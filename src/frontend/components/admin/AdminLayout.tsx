@@ -46,6 +46,18 @@ const navigation = [
     description: 'Control de efectivo y cambios'
   },
   {
+    name: 'Registro de Auditoría',
+    href: '/admin/audit',
+    icon: Shield,
+    description: 'Monitoreo de seguridad y eventos'
+  },
+  {
+    name: 'Gestión de Turnos',
+    href: '/admin/shifts',
+    icon: Clock,
+    description: 'Horarios y rendimiento de operadores'
+  },
+  {
     name: 'Configuración',
     href: '/admin/settings',
     icon: Settings,
