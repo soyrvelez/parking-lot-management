@@ -1,12 +1,12 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Enhanced Prisma schema for Parking Lot Management System
+// PostgreSQL with comprehensive audit logging and financial precision
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -16,13 +16,32 @@ model Ticket {
   barcode      String    @unique
   entryTime    DateTime  @default(now())
   exitTime     DateTime?
-  totalAmount  Decimal?  @db.Decimal(10, 2)
+  totalAmount  Decimal?  @db.Decimal(12, 2) @default(0)
   status       TicketStatus @default(ACTIVE)
   printedAt    DateTime  @default(now())
   paidAt       DateTime?
   
+  // Enhanced fields for error recovery and audit
+  needsReprint    Boolean   @default(false)
+  failureReason   String?
+  failureTimestamp DateTime?
+  gracePeriodUntil DateTime?
+  operatorId      String?
+  vehicleType     String?   @default("car")
+  notes          String?
+  paymentMethod  String?   @default("CASH")
+  
   // Relations
   transactions Transaction[]
+  auditLogs    AuditLog[]
+  
+  // Note: Financial constraints enforced in application layer with Money class
+  
+  // Indexes for performance
+  @@index([plateNumber])
+  @@index([status])
+  @@index([entryTime])
+  @@index([barcode])
   
   @@map("tickets")
 }
@@ -48,18 +67,38 @@ model PensionCustomer {
 }
 
 model Transaction {
-  id          String    @id @default(cuid())
-  type        TransactionType
-  amount      Decimal   @db.Decimal(10, 2)
-  description String?
-  timestamp   DateTime  @default(now())
-  operatorId  String?
+  id            String    @id @default(cuid())
+  type          TransactionType
+  amount        Decimal   @db.Decimal(12, 2)
+  description   String?
+  timestamp     DateTime  @default(now())
+  operatorId    String?
+  
+  // Enhanced audit fields for balance tracking
+  balanceBefore Decimal?  @db.Decimal(12, 2)
+  balanceAfter  Decimal?  @db.Decimal(12, 2)
+  paymentMethod String?   @default("CASH")
+  changeGiven   Decimal?  @db.Decimal(12, 2)
+  
+  // Additional audit fields
+  ipAddress     String?
+  deviceId      String?
+  sessionId     String?
   
   // Relations
-  ticket      Ticket?   @relation(fields: [ticketId], references: [id])
-  ticketId    String?
-  pension     PensionCustomer? @relation(fields: [pensionId], references: [id])
-  pensionId   String?
+  ticket        Ticket?   @relation(fields: [ticketId], references: [id])
+  ticketId      String?
+  pension       PensionCustomer? @relation(fields: [pensionId], references: [id])
+  pensionId     String?
+  auditLogs     AuditLog[]
+  
+  // Note: Financial constraints enforced in application layer with Money class
+  
+  // Indexes for reporting and audit
+  @@index([type])
+  @@index([timestamp])
+  @@index([operatorId])
+  @@index([ticketId])
   
   @@map("transactions")
 }
@@ -67,26 +106,56 @@ model Transaction {
 model PricingConfig {
   id                  String  @id @default(cuid())
   minimumHours        Int     @default(1)
-  minimumRate         Decimal @db.Decimal(10, 2)
+  minimumRate         Decimal @db.Decimal(12, 2)
   incrementMinutes    Int     @default(15)
-  incrementRates      String  // JSON array of rates for each increment
+  incrementRate       Decimal @db.Decimal(12, 2) @default(0)
   dailySpecialHours   Int?
-  dailySpecialRate    Decimal? @db.Decimal(10, 2)
-  monthlyRate         Decimal @db.Decimal(10, 2)
-  lostTicketFee       Decimal @db.Decimal(10, 2)
+  dailySpecialRate    Decimal? @db.Decimal(12, 2)
+  monthlyRate         Decimal @db.Decimal(12, 2)
+  lostTicketFee       Decimal @db.Decimal(12, 2)
+  isActive            Boolean @default(true)
+  validFrom           DateTime @default(now())
+  validUntil          DateTime?
+  createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+  createdBy           String?
+  
+  // Relations to normalized increment rates
+  incrementRates      IncrementRate[]
+  auditLogs          AuditLog[]
+  
+  // Note: Financial constraints enforced in application layer with Money class
+  
+  @@index([isActive])
+  @@index([validFrom])
   
   @@map("pricing_config")
 }
 
 model CashRegister {
   id             String    @id @default(cuid())
-  openingBalance Decimal   @db.Decimal(10, 2)
-  currentBalance Decimal   @db.Decimal(10, 2)
-  withdrawals    String    // JSON array of withdrawal records
-  deposits       String    // JSON array of deposit records
-  lastUpdated    DateTime  @updatedAt
+  openingBalance Decimal   @db.Decimal(12, 2)
+  currentBalance Decimal   @db.Decimal(12, 2)
+  expectedBalance Decimal? @db.Decimal(12, 2)
+  discrepancy    Decimal?  @db.Decimal(12, 2)
   date           DateTime  @default(now())
+  shiftStart     DateTime  @default(now())
+  shiftEnd       DateTime?
+  operatorId     String?
+  status         CashRegisterStatus @default(OPEN)
+  notes          String?
+  lastUpdated    DateTime  @updatedAt
+  
+  // Relations to normalized cash flows
+  cashFlows      CashFlow[]
+  auditLogs      AuditLog[]
+  
+  // Note: Financial constraints enforced in application layer with Money class
+  
+  // Indexes
+  @@index([date])
+  @@index([operatorId])
+  @@index([status])
   
   @@map("cash_register")
 }
@@ -97,10 +166,101 @@ model Admin {
   password  String   // bcrypt hashed
   name      String
   isActive  Boolean  @default(true)
+  role      AdminRole @default(ADMIN)
+  lastLogin DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   
+  // Relations
+  auditLogs AuditLog[]
+  
+  @@index([email])
+  @@index([isActive])
+  
   @@map("admins")
+}
+
+// NEW: Normalized increment rates table
+model IncrementRate {
+  id              String        @id @default(cuid())
+  pricingConfigId String
+  pricingConfig   PricingConfig @relation(fields: [pricingConfigId], references: [id], onDelete: Cascade)
+  incrementNumber Int           // 1st increment, 2nd increment, etc.
+  rate            Decimal       @db.Decimal(12, 2)
+  description     String?       // Optional description
+  createdAt       DateTime      @default(now())
+  
+  // Note: Financial constraints enforced in application layer with Money class
+  
+  // Unique constraint to prevent duplicate increments per config
+  @@unique([pricingConfigId, incrementNumber])
+  
+  @@index([pricingConfigId])
+  
+  @@map("increment_rates")
+}
+
+// NEW: Normalized cash flow table (replaces JSON fields)
+model CashFlow {
+  id             String         @id @default(cuid())
+  cashRegisterId String
+  cashRegister   CashRegister   @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  type           CashFlowType
+  amount         Decimal        @db.Decimal(12, 2)
+  reason         String?
+  performedBy    String?        // Operator or admin who performed the action
+  authorizedBy   String?        // Admin who authorized (for withdrawals)
+  timestamp      DateTime       @default(now())
+  notes          String?
+  
+  // Relations
+  auditLogs      AuditLog[]
+  
+  // Note: Financial constraints enforced in application layer with Money class
+  
+  // Indexes
+  @@index([cashRegisterId])
+  @@index([type])
+  @@index([timestamp])
+  @@index([performedBy])
+  
+  @@map("cash_flows")
+}
+
+// NEW: Comprehensive audit logging
+model AuditLog {
+  id          String   @id @default(cuid())
+  entityType  String   // "Ticket", "Transaction", "CashRegister", etc.
+  entityId    String
+  action      String   // "CREATE", "UPDATE", "DELETE", "PAYMENT", etc.
+  oldValue    Json?    // Previous state
+  newValue    Json?    // New state
+  performedBy String?  // User ID who performed the action
+  ipAddress   String?
+  userAgent   String?
+  timestamp   DateTime @default(now())
+  
+  // Relations - polymorphic associations
+  ticket         Ticket?         @relation(fields: [ticketId], references: [id])
+  ticketId       String?
+  transaction    Transaction?    @relation(fields: [transactionId], references: [id])
+  transactionId  String?
+  pricingConfig  PricingConfig?  @relation(fields: [pricingConfigId], references: [id])
+  pricingConfigId String?
+  cashRegister   CashRegister?   @relation(fields: [cashRegisterId], references: [id])
+  cashRegisterId String?
+  cashFlow       CashFlow?       @relation(fields: [cashFlowId], references: [id])
+  cashFlowId     String?
+  admin          Admin?          @relation(fields: [adminId], references: [id])
+  adminId        String?
+  
+  // Indexes for efficient querying
+  @@index([entityType, entityId])
+  @@index([timestamp])
+  @@index([performedBy])
+  @@index([action])
+  
+  @@map("audit_logs")
 }
 
 enum TicketStatus {
@@ -118,4 +278,29 @@ enum TransactionType {
   REFUND
   WITHDRAWAL
   DEPOSIT
+  ADJUSTMENT
+  OPENING_BALANCE
+  CLOSING_BALANCE
+}
+
+enum CashFlowType {
+  WITHDRAWAL
+  DEPOSIT
+  ADJUSTMENT
+  OPENING_BALANCE
+  CLOSING_BALANCE
+}
+
+enum CashRegisterStatus {
+  OPEN
+  CLOSED
+  SUSPENDED
+  RECONCILING
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  ADMIN
+  MANAGER
+  VIEWER
 }

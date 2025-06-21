@@ -19,8 +19,7 @@ module.exports = {
     '!src/**/*.test.{ts,tsx}',
     '!src/**/index.ts'
   ],
-  setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
-  moduleNameMapping: {
+  moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     '^@/backend/(.*)$': '<rootDir>/src/backend/$1',
     '^@/frontend/(.*)$': '<rootDir>/src/frontend/$1',
