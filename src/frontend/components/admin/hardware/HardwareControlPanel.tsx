@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Monitor, Printer, Scan, Database, Wifi, AlertTriangle, CheckCircle, XCircle, RefreshCw, Zap, Activity } from 'lucide-react';
 
 interface HardwareStatus {

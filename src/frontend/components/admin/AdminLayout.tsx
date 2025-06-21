@@ -13,7 +13,8 @@ import {
   DollarSign,
   Car,
   Home,
-  Shield
+  Shield,
+  Clock
 } from 'lucide-react';
 
 interface AdminLayoutProps {
