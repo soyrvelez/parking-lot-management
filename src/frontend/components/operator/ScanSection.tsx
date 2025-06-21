@@ -3,10 +3,11 @@ import { Scan, AlertCircle, Clock } from 'lucide-react';
 
 interface ScanSectionProps {
   onTicketFound: (ticket: any) => void;
+  onPensionCustomerFound: (customer: any) => void;
   onSwitchToEntry: () => void;
 }
 
-export default function ScanSection({ onTicketFound, onSwitchToEntry }: ScanSectionProps) {
+export default function ScanSection({ onTicketFound, onPensionCustomerFound, onSwitchToEntry }: ScanSectionProps) {
   const [scannedCode, setScannedCode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState('');
@@ -31,18 +32,32 @@ export default function ScanSection({ onTicketFound, onSwitchToEntry }: ScanSect
     setError('');
     
     try {
-      const response = await fetch(`/api/parking/tickets/lookup/${scannedCode}`);
-      const ticket = await response.json();
+      // First try to find regular parking ticket
+      let response = await fetch(`/api/parking/tickets/lookup/${scannedCode}`);
+      let result = await response.json();
       
-      if (response.ok) {
-        // Extract ticket data from API response
-        const ticketData = ticket.data || ticket;
-        console.log('Found ticket data:', ticketData);
-        onTicketFound(ticketData);
-      } else {
-        const errorMessage = ticket.error?.message || ticket.message || 'Boleto no encontrado';
-        setError(errorMessage);
+      if (response.ok && result.data) {
+        // Found regular ticket
+        console.log('Found ticket data:', result.data);
+        onTicketFound(result.data);
+        return;
       }
+      
+      // If not found, try pension customer lookup
+      response = await fetch(`/api/pension/lookup/${scannedCode}`);
+      result = await response.json();
+      
+      if (response.ok && result.data) {
+        // Found pension customer
+        console.log('Found pension customer:', result.data);
+        onPensionCustomerFound(result.data);
+        return;
+      }
+      
+      // Neither found
+      const errorMessage = result.error?.message || result.message || 'Boleto o cliente de pensión no encontrado';
+      setError(errorMessage);
+      
     } catch (err) {
       setError('Error de conexión. Verifique la red.');
     } finally {

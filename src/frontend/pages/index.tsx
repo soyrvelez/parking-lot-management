@@ -1,13 +1,15 @@
 import { useState } from 'react';
-import { Car, Scan, DollarSign, FileText } from 'lucide-react';
-import ScanSection from '@/components/operator/ScanSection';
-import EntrySection from '@/components/operator/EntrySection';
-import PaymentSection from '@/components/operator/PaymentSection';
-import StatusDisplay from '@/components/operator/StatusDisplay';
+import { Car, Scan, DollarSign, FileText, Users } from 'lucide-react';
+import ScanSection from '../components/operator/ScanSection';
+import EntrySection from '../components/operator/EntrySection';
+import PaymentSection from '../components/operator/PaymentSection';
+import PensionSection from '../components/operator/PensionSection';
+import StatusDisplay from '../components/operator/StatusDisplay';
 
 export default function OperatorInterface() {
-  const [currentView, setCurrentView] = useState<'scan' | 'entry' | 'payment'>('scan');
+  const [currentView, setCurrentView] = useState<'scan' | 'entry' | 'payment' | 'pension'>('scan');
   const [currentTicket, setCurrentTicket] = useState<any>(null);
+  const [currentPensionCustomer, setCurrentPensionCustomer] = useState<any>(null);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -31,6 +33,10 @@ export default function OperatorInterface() {
                     setCurrentTicket(ticket);
                     setCurrentView('payment');
                   }}
+                  onPensionCustomerFound={(customer) => {
+                    setCurrentPensionCustomer(customer);
+                    setCurrentView('pension');
+                  }}
                   onSwitchToEntry={() => setCurrentView('entry')}
                 />
               )}
@@ -52,6 +58,12 @@ export default function OperatorInterface() {
                     setCurrentTicket(null);
                     setCurrentView('scan');
                   }}
+                  onBack={() => setCurrentView('scan')}
+                />
+              )}
+
+              {currentView === 'pension' && (
+                <PensionSection 
                   onBack={() => setCurrentView('scan')}
                 />
               )}
@@ -82,6 +94,14 @@ export default function OperatorInterface() {
                 >
                   <Car className="w-5 h-5" />
                   Nueva Entrada
+                </button>
+
+                <button
+                  onClick={() => setCurrentView('pension')}
+                  className="btn-success btn-operator w-full flex items-center justify-center gap-3"
+                >
+                  <Users className="w-5 h-5" />
+                  Clientes Pensión
                 </button>
                 
                 {currentTicket && (
