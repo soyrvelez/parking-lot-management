@@ -1,0 +1,55 @@
+name: "parking-lot-management"
+description: "Single lot parking management system with operator interface and admin dashboard"
+
+# Project-specific configuration
+language_servers:
+  - typescript
+  - javascript
+  - json
+
+# Security settings for production system
+read_only: false
+enable_shell_execution: true
+
+# Custom modes for this project
+default_modes:
+  - "planning"
+  - "interactive"
+
+# Tools to exclude for security (if needed)
+excluded_tools: []
+
+# Project-specific prompts
+project_prompts:
+  financial_focus: |
+    Remember: This is a financial system handling real money transactions.
+    ALWAYS use Decimal.js for monetary calculations. NO floating point arithmetic.
+    All amounts must be precise to avoid financial discrepancies.
+  
+  spanish_localization: |
+    All user-facing content must be in Mexican Spanish.
+    Use proper currency formatting for Mexican Pesos (MXN).
+    Time should display in Mexico City timezone.
+  
+  hardware_integration: |
+    This system integrates with:
+    - Epson TM-T20III thermal printer
+    - Honeywell Voyager 1250g barcode scanner
+    - Code 39 barcode format
+    Test hardware integration thoroughly.
+  
+  operator_ux: |
+    Operator interface must be extremely simple:
+    - Single screen operation
+    - Minimal typing required
+    - Large, touch-friendly buttons
+    - High contrast for ThinkPad trackpad use
+    - Clear status indicators
+
+# Development workflow reminders
+development_rules:
+  - "Plan first, then spec, then test, then implement"
+  - "No placeholder code - implement full functionality"
+  - "Comment any future development needs clearly"
+  - "Test financial calculations extensively"
+  - "Validate Spanish translations"

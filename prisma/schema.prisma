@@ -1,0 +1,121 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Ticket {
+  id           String    @id @default(cuid())
+  plateNumber  String
+  barcode      String    @unique
+  entryTime    DateTime  @default(now())
+  exitTime     DateTime?
+  totalAmount  Decimal?  @db.Decimal(10, 2)
+  status       TicketStatus @default(ACTIVE)
+  printedAt    DateTime  @default(now())
+  paidAt       DateTime?
+  
+  // Relations
+  transactions Transaction[]
+  
+  @@map("tickets")
+}
+
+model PensionCustomer {
+  id           String    @id @default(cuid())
+  name         String
+  phone        String?
+  plateNumber  String    @unique
+  vehicleMake  String?
+  vehicleModel String?
+  monthlyRate  Decimal   @db.Decimal(10, 2)
+  startDate    DateTime
+  endDate      DateTime
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  
+  // Relations
+  transactions Transaction[]
+  
+  @@map("pension_customers")
+}
+
+model Transaction {
+  id          String    @id @default(cuid())
+  type        TransactionType
+  amount      Decimal   @db.Decimal(10, 2)
+  description String?
+  timestamp   DateTime  @default(now())
+  operatorId  String?
+  
+  // Relations
+  ticket      Ticket?   @relation(fields: [ticketId], references: [id])
+  ticketId    String?
+  pension     PensionCustomer? @relation(fields: [pensionId], references: [id])
+  pensionId   String?
+  
+  @@map("transactions")
+}
+
+model PricingConfig {
+  id                  String  @id @default(cuid())
+  minimumHours        Int     @default(1)
+  minimumRate         Decimal @db.Decimal(10, 2)
+  incrementMinutes    Int     @default(15)
+  incrementRates      String  // JSON array of rates for each increment
+  dailySpecialHours   Int?
+  dailySpecialRate    Decimal? @db.Decimal(10, 2)
+  monthlyRate         Decimal @db.Decimal(10, 2)
+  lostTicketFee       Decimal @db.Decimal(10, 2)
+  updatedAt           DateTime @updatedAt
+  
+  @@map("pricing_config")
+}
+
+model CashRegister {
+  id             String    @id @default(cuid())
+  openingBalance Decimal   @db.Decimal(10, 2)
+  currentBalance Decimal   @db.Decimal(10, 2)
+  withdrawals    String    // JSON array of withdrawal records
+  deposits       String    // JSON array of deposit records
+  lastUpdated    DateTime  @updatedAt
+  date           DateTime  @default(now())
+  
+  @@map("cash_register")
+}
+
+model Admin {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // bcrypt hashed
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("admins")
+}
+
+enum TicketStatus {
+  ACTIVE
+  PAID
+  LOST
+  CANCELLED
+  REFUNDED
+}
+
+enum TransactionType {
+  PARKING
+  PENSION
+  LOST_TICKET
+  REFUND
+  WITHDRAWAL
+  DEPOSIT
+}
