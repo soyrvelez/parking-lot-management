@@ -50,7 +50,9 @@ export default function EntrySection({ onTicketCreated, onBack }: EntrySectionPr
 
       if (response.ok) {
         setSuccess('¡Boleto creado exitosamente!');
-        onTicketCreated(result);
+        // Extract ticket data from API response
+        const ticketData = result.data || result;
+        onTicketCreated(ticketData);
         reset();
         
         // Auto print ticket
@@ -66,7 +68,8 @@ export default function EntrySection({ onTicketCreated, onBack }: EntrySectionPr
           console.warn('Error al imprimir:', printError);
         }
       } else {
-        setError(result.error || 'Error al crear el boleto');
+        const errorMessage = result.error?.message || result.message || 'Error al crear el boleto';
+        setError(errorMessage);
       }
     } catch (err) {
       setError('Error de conexión. Verifique la red.');

@@ -4,8 +4,8 @@
  */
 
 import { EventEmitter } from 'events';
-import { Money } from '@/shared/utils/money';
-import { i18n } from '@/shared/localization';
+import { Money } from '../../../shared/utils/money';
+import { i18n } from '../../../shared/localization';
 
 export interface Ticket {
   id: string;

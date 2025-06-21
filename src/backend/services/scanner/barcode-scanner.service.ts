@@ -13,8 +13,8 @@ import {
   ManualEntryOptions,
   FocusManagerOptions,
   HARDWARE_CONSTANTS 
-} from '@/shared/types/hardware';
-import { i18n } from '@/shared/localization';
+} from '../../../shared/types/hardware';
+import { i18n } from '../../../shared/localization';
 
 export interface BarcodeScannerEvents {
   'barcodeScanned': (result: ScanResult) => void;

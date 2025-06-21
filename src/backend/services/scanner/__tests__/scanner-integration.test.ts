@@ -5,9 +5,9 @@
 
 import { BarcodeScannerService } from '../barcode-scanner.service';
 import { ThermalPrinterService } from '../../printer/thermal-printer.service';
-import { ScanResult, ReceiptData } from '@/shared/types/hardware';
-import { Money } from '@/shared/utils/money';
-import { i18n } from '@/shared/localization';
+import { ScanResult, ReceiptData } from '../../../../shared/types/hardware';
+import { Money } from '../../../../shared/utils/money';
+import { i18n } from '../../../../shared/localization';
 
 // Mock DOM environment
 const mockElement = {

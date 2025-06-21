@@ -26,10 +26,18 @@ export default function StatusDisplay() {
 
   const fetchStats = async () => {
     try {
-      const response = await fetch('/api/admin/dashboard/stats');
+      const response = await fetch('/api/operator/dashboard/stats');
       if (response.ok) {
-        const data = await response.json();
-        setStats(data);
+        const result = await response.json();
+        if (result.success && result.data && result.data.metrics) {
+          const metrics = result.data.metrics;
+          setStats({
+            activeTickets: metrics.activeVehicles || 0,
+            todayRevenue: metrics.todayRevenue || '$0.00 pesos',
+            averageStay: metrics.averageDuration || '0h 0m',
+            systemStatus: 'online' // Determined from hardware status
+          });
+        }
       }
     } catch (error) {
       console.error('Error fetching stats:', error);
@@ -39,8 +47,16 @@ export default function StatusDisplay() {
   };
 
   const formatCurrency = (amount: string) => {
-    const value = new Decimal(amount);
-    return `$${value.toFixed(2)} MXN`;
+    if (!amount || amount === undefined) return '$0.00 MXN';
+    try {
+      // Extract numeric value from formatted string like "$25.00 pesos"
+      const numericValue = amount.replace(/[^0-9.]/g, '');
+      const value = new Decimal(numericValue || '0');
+      return `$${value.toFixed(2)} MXN`;
+    } catch (error) {
+      console.error('Error formatting currency:', error);
+      return '$0.00 MXN';
+    }
   };
 
   const getStatusColor = (status: string) => {

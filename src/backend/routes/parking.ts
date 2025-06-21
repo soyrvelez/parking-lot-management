@@ -58,6 +58,9 @@ router.post(
   parkingController.processLostTicket.bind(parkingController)
 );
 
+// Ticket lookup by barcode/ID for scanner
+router.get('/tickets/lookup/:barcode', parkingController.lookupTicket.bind(parkingController));
+
 // Current status endpoint (for operators)
 router.get('/status', parkingController.getStatus.bind(parkingController));
 

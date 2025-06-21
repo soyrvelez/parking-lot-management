@@ -31,13 +31,17 @@ export default function ScanSection({ onTicketFound, onSwitchToEntry }: ScanSect
     setError('');
     
     try {
-      const response = await fetch(`/api/tickets/lookup/${scannedCode}`);
+      const response = await fetch(`/api/parking/tickets/lookup/${scannedCode}`);
       const ticket = await response.json();
       
       if (response.ok) {
-        onTicketFound(ticket);
+        // Extract ticket data from API response
+        const ticketData = ticket.data || ticket;
+        console.log('Found ticket data:', ticketData);
+        onTicketFound(ticketData);
       } else {
-        setError(ticket.error || 'Boleto no encontrado');
+        const errorMessage = ticket.error?.message || ticket.message || 'Boleto no encontrado';
+        setError(errorMessage);
       }
     } catch (err) {
       setError('Error de conexión. Verifique la red.');

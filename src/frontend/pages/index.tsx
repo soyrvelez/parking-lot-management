@@ -27,14 +27,20 @@ export default function OperatorInterface() {
             <div className="card">
               {currentView === 'scan' && (
                 <ScanSection 
-                  onTicketFound={setCurrentTicket}
+                  onTicketFound={(ticket) => {
+                    setCurrentTicket(ticket);
+                    setCurrentView('payment');
+                  }}
                   onSwitchToEntry={() => setCurrentView('entry')}
                 />
               )}
               
               {currentView === 'entry' && (
                 <EntrySection 
-                  onTicketCreated={setCurrentTicket}
+                  onTicketCreated={(ticket) => {
+                    setCurrentTicket(null); // Clear ticket after entry
+                    setCurrentView('scan'); // Go back to scan mode
+                  }}
                   onBack={() => setCurrentView('scan')}
                 />
               )}

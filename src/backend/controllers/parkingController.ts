@@ -71,25 +71,14 @@ export class ParkingController {
           ticketNumber: ticket.id,
           plateNumber: ticket.plateNumber,
           entryTime: ticket.entryTime,
-          barcode: ticket.barcode!,
-          estimatedFee: Money.fromNumber(25).formatPesos() // Minimum fee estimate
+          totalAmount: 25.00,
+          type: 'ENTRY'
         });
       } catch (printError) {
         // Log print failure but don't fail the entry
         console.error('Failed to print entry ticket:', printError);
         
-        // Queue for retry
-        await this.printerService.addToPrintQueue({
-          type: 'ENTRY_TICKET',
-          data: {
-            ticketNumber: ticket.id,
-            plateNumber: ticket.plateNumber,
-            entryTime: ticket.entryTime,
-            barcode: ticket.barcode!,
-            estimatedFee: Money.fromNumber(25).formatPesos()
-          },
-          priority: 'HIGH'
-        });
+        // Queue for retry handled internally by printEntryTicket
       }
 
       // Log entry
@@ -191,7 +180,7 @@ export class ParkingController {
               period: inc.period,
               amount: inc.amount.formatPesos()
             })),
-            specialDiscount: breakdown.specialDiscount?.formatPesos(),
+            specialDiscount: null, // Not implemented yet
             subtotal: breakdown.subtotal.formatPesos(),
             total: total.formatPesos()
           },
@@ -310,8 +299,9 @@ export class ParkingController {
           totalAmount: totalAmount.toNumber(),
           cashReceived: cashGiven.toNumber(),
           change: changeAmount.toNumber(),
-          paymentMethod: 'efectivo',
-          durationMinutes
+          paymentMethod: 'EFECTIVO',
+          durationMinutes,
+          type: 'PAYMENT'
         });
         receiptPrinted = true;
       } catch (printError) {
@@ -400,7 +390,7 @@ export class ParkingController {
         where: { id: ticketNumber },
         data: {
           exitTime,
-          status: 'COMPLETED'
+          status: 'PAID'
         }
       });
 
@@ -409,7 +399,7 @@ export class ParkingController {
         ticketNumber: ticket.id,
         plateNumber: ticket.plateNumber,
         totalDuration: `${totalDuration} minutos`,
-        amountPaid: Money.fromNumber(ticket.totalAmount || 0).formatPesos()
+        amountPaid: Money.fromNumber(typeof ticket.totalAmount === 'number' ? ticket.totalAmount : 0).formatPesos()
       });
 
       res.json({
@@ -419,7 +409,7 @@ export class ParkingController {
           plateNumber: ticket.plateNumber,
           exitTime: i18n.formatDateTime(exitTime),
           totalDuration: i18n.formatDuration(totalDuration),
-          amountPaid: Money.fromNumber(ticket.totalAmount || 0).formatPesos(),
+          amountPaid: Money.fromNumber(typeof ticket.totalAmount === 'number' ? ticket.totalAmount : 0).formatPesos(),
           gateOpened: true,
           message: i18n.t('parking.exit_successful')
         },
@@ -590,11 +580,14 @@ export class ParkingController {
         // Try to print lost ticket receipt
         try {
           await this.printerService.printLostTicketReceipt({
+            ticketNumber: 'LOST-' + Date.now().toString().slice(-6),
             plateNumber: plateNumber.toUpperCase(),
+            entryTime: new Date(),
             lostTicketFee: lostTicketFee.toNumber(),
+            totalAmount: lostTicketFee.toNumber(),
             cashReceived: cashGiven.toNumber(),
             change: changeAmount.toNumber(),
-            timestamp: new Date()
+            type: 'LOST_TICKET'
           });
         } catch (printError) {
           console.error('Failed to print lost ticket receipt:', printError);
@@ -628,7 +621,7 @@ export class ParkingController {
         success: true,
         data: {
           activeVehicles: activeTickets,
-          todayRevenue: Money.fromNumber(todayRevenue._sum.amount || 0).formatPesos(),
+          todayRevenue: Money.fromNumber(typeof todayRevenue._sum.amount === 'number' ? todayRevenue._sum.amount : 0).formatPesos(),
           hardware: {
             scanner: this.scannerService.getStatus(),
             printer: this.printerService.getStatus()
@@ -783,7 +776,7 @@ export class ParkingController {
                 period: inc.period,
                 amount: inc.amount.formatPesos()
               })),
-              specialDiscount: breakdown.specialDiscount?.formatPesos(),
+              specialDiscount: null, // Not implemented yet
               subtotal: breakdown.subtotal.formatPesos(),
               total: total.formatPesos()
             },
@@ -835,5 +828,87 @@ export class ParkingController {
         specialDiscount: null
       }
     };
+  }
+
+  async lookupTicket(req: Request, res: Response): Promise<void> {
+    const { barcode } = req.params;
+    
+    try {
+      // Find ticket by barcode or ID
+      const ticket = await prisma.ticket.findFirst({
+        where: {
+          OR: [
+            { barcode: barcode },
+            { id: barcode }
+          ]
+        },
+        include: {
+          transactions: {
+            orderBy: { timestamp: 'desc' }
+          }
+        }
+      });
+
+      if (!ticket) {
+        throw new BusinessLogicError(
+          i18n.t('parking.ticket_not_found'),
+          'TICKET_NOT_FOUND',
+          404,
+          { barcode }
+        );
+      }
+
+      // Calculate current duration and fees if active
+      let currentDuration = 0;
+      let estimatedFee = Money.ZERO;
+      let paymentRequired = false;
+
+      if (ticket.status === 'ACTIVE') {
+        const currentTime = new Date();
+        currentDuration = Math.floor((currentTime.getTime() - ticket.entryTime.getTime()) / (1000 * 60));
+        
+        // Get pricing to calculate current fee
+        const pricing = await prisma.pricingConfig.findFirst({
+          orderBy: { createdAt: 'desc' }
+        });
+
+        if (pricing) {
+          const { total } = this.calculateParkingFee(currentDuration, pricing);
+          estimatedFee = total;
+          paymentRequired = total.greaterThan(Money.ZERO);
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          id: ticket.id,
+          ticketNumber: ticket.id,
+          plateNumber: ticket.plateNumber,
+          status: ticket.status,
+          entryTime: ticket.entryTime.toISOString(),
+          exitTime: ticket.exitTime?.toISOString() || null,
+          currentDuration: ticket.status === 'ACTIVE' ? i18n.formatDuration(currentDuration) : null,
+          estimatedFee: ticket.status === 'ACTIVE' ? estimatedFee.formatPesos() : null,
+          totalAmount: ticket.totalAmount ? Money.fromNumber(ticket.totalAmount.toNumber()).formatPesos() : null,
+          paymentMethod: ticket.paymentMethod || null,
+          paidAt: ticket.paidAt?.toISOString() || null,
+          paymentRequired: ticket.status === 'ACTIVE' ? paymentRequired : false,
+          vehicleType: ticket.vehicleType || 'car',
+          barcode: ticket.barcode,
+          transactions: ticket.transactions.map(tx => ({
+            id: tx.id,
+            type: tx.type,
+            amount: Money.fromNumber(tx.amount.toNumber()).formatPesos(),
+            timestamp: tx.timestamp.toISOString(),
+            description: tx.description
+          }))
+        },
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      throw error;
+    }
   }
 }

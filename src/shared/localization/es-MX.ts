@@ -21,71 +21,89 @@ export const esMX: TranslationKey = {
                  lost_ticket: 'Boleto Extraviado',
                  pension: 'Pensión',
                  monthly: 'Mensual',
+                 vehicle_already_inside: 'Vehículo ya se encuentra dentro del estacionamiento',
+                 entry_successful: 'Entrada registrada exitosamente',
+                 ticket_not_found: 'Boleto no encontrado',
+                 ticket_already_processed: 'Boleto ya fue procesado',
+                 barcode_mismatch: 'Código de barras no coincide',
+                 free_period: 'Estacionamiento gratuito - Sin costo',
+                 payment_required: 'Pago requerido: {amount}',
+                 insufficient_payment: 'Pago insuficiente',
+                 payment_successful: 'Pago procesado exitosamente',
+                 payment_required_for_exit: 'Debe pagar antes de salir',
+                 exit_successful: 'Salida autorizada - Que tenga buen viaje'
                },
                
                // Hardware Status
                hardware: {
-                                printer_connected: 'Impresora Conectada',
-                                printer_disconnected: 'Impresora Desconectada',
-                                printer_error: 'Error de Impresora',
-                                scanner_ready: 'Escáner Listo',
-                                scanner_error: 'Error de Escáner',
-                                hardware_check: 'Verificación de Hardware',
-                                connection_failed: 'Conexión Fallida',
-                                retry_connection: 'Reintentando Conexión',
-                                receipt_printing: 'Imprimiendo Recibo...',
-                                scan_timeout: 'Tiempo Agotado. Ingrese Manualmente.',
-                                hardware_maintenance: 'Mantenimiento del Sistema',
-                                connection_restored: 'Conexión Restablecida',
-                                manual_entry_required: 'Entrada Manual Requerida',
-                               printer_init_failed: 'Error al Inicializar Impresora',
-                               queue_full: 'Cola de Impresión Llena',
-                               print_failed: 'Error al Imprimir',
-                               execution_error: 'Error de Ejecución',
-                               health_check_failed: 'Verificación de Estado Fallida',
-                               test_print: 'IMPRESIÓN DE PRUEBA',
-                               test_successful: 'Prueba Exitosa',
-                               // Scanner specific translations
-                               scan_already_active: 'Escaneo Ya Activo',
-                               empty_scan_buffer: 'Buffer de Escaneo Vacío',
-                               invalid_barcode: 'Código de Barras Inválido: {reason}',
-                               manual_entry_already_active: 'Entrada Manual Ya Activa',
-                               manual_entry_timeout: 'Tiempo de Entrada Manual Agotado',
-                               no_manual_entry_active: 'No Hay Entrada Manual Activa',
-                               invalid_manual_input: 'Entrada Manual Inválida: {reason}',
-                               enter_manually_placeholder: 'Ingrese el código manualmente',
-                               barcode_too_short: 'Código muy corto (mínimo {minLength} caracteres)',
-                               barcode_too_long: 'Código muy largo (máximo {maxLength} caracteres)',
-                               invalid_code39_characters: 'Caracteres inválidos para Código 39',
-                               empty_input: 'Entrada Vacía',
-                               focus_element_not_found: 'Elemento de enfoque no encontrado: {selector}',
-                               scanner_destroyed: 'Escáner Destruido',
-                              },
+                 printer_connected: 'Impresora Conectada',
+                 printer_disconnected: 'Impresora Desconectada',
+                 printer_error: 'Error de Impresora',
+                 scanner_ready: 'Escáner Listo',
+                 scanner_error: 'Error de Escáner',
+                 hardware_check: 'Verificación de Hardware',
+                 connection_failed: 'Conexión Fallida',
+                 retry_connection: 'Reintentando Conexión',
+                 receipt_printing: 'Imprimiendo Recibo...',
+                 scan_timeout: 'Tiempo Agotado. Ingrese Manualmente.',
+                 hardware_maintenance: 'Mantenimiento del Sistema',
+                 connection_restored: 'Conexión Restablecida',
+                 manual_entry_required: 'Entrada Manual Requerida',
+                 queue_full: 'Cola de Impresión Llena',
+                 print_failed: 'Error al Imprimir',
+                 execution_error: 'Error de Ejecución',
+                 health_check_failed: 'Verificación de Estado Fallida',
+                 test_print: 'IMPRESIÓN DE PRUEBA',
+                 test_successful: 'Prueba Exitosa',
+                 scan_already_active: 'Escaneo Ya Activo',
+                 empty_scan_buffer: 'Buffer de Escaneo Vacío',
+                 invalid_barcode: 'Código de Barras Inválido: {reason}',
+                 manual_entry_already_active: 'Entrada Manual Ya Activa',
+                 manual_entry_timeout: 'Tiempo de Entrada Manual Agotado',
+                 no_manual_entry_active: 'No Hay Entrada Manual Activa',
+                 invalid_manual_input: 'Entrada Manual Inválida: {reason}',
+                 enter_manually_placeholder: 'Ingrese el código manualmente',
+                 barcode_too_short: 'Código muy corto (mínimo {minLength} caracteres)',
+                 barcode_too_long: 'Código muy largo (máximo {maxLength} caracteres)',
+                 invalid_code39_characters: 'Caracteres inválidos para Código 39',
+                 empty_input: 'Entrada Vacía',
+                 focus_element_not_found: 'Elemento de enfoque no encontrado: {selector}',
+                 scanner_destroyed: 'Escáner Destruido',
+               },
                
-                              // Payment and transaction translations
-                              payment: {
-                                insufficient_amount: 'Cantidad insuficiente. Se requiere {required}, se proporcionó {provided}',
-                                insufficient_lost_ticket_fee: 'Tarifa de boleto perdido insuficiente. Se requiere {required}, se proporcionó {provided}',
-                                payment_successful: 'Pago exitoso',
-                                payment_failed: 'Error en el pago',
-                                change_amount: 'Su cambio: {amount}',
-                              },
+               // Payment and transaction translations
+               payment: {
+                 insufficient_amount: 'Cantidad insuficiente. Se requiere {required}, se proporcionó {provided}',
+                 insufficient_lost_ticket_fee: 'Tarifa de boleto perdido insuficiente. Se requiere {required}, se proporcionó {provided}',
+                 payment_successful: 'Pago exitoso',
+                 payment_failed: 'Error en el pago',
+                 change_amount: 'Su cambio: {amount}',
+               },
                               
-                              // Transaction descriptions
-                              transaction: {
-                                parking_payment: 'Pago de estacionamiento - Placa {plate} - Duración {duration}',
-                                lost_ticket_fee: 'Tarifa por boleto perdido - Placa {plate}',
-                                pension_payment: 'Pago de pensión mensual - {customerName}',
-                                refund: 'Reembolso - {reason}',
-                              },
+               // Transaction descriptions
+               transaction: {
+                 parking_payment: 'Pago de estacionamiento - Placa {plate} - Duración {duration}',
+                 lost_ticket_fee: 'Tarifa por boleto perdido - Placa {plate}',
+                 pension_payment: 'Pago de pensión mensual - {customerName}',
+                 refund: 'Reembolso - {reason}',
+                 parking: 'Estacionamiento',
+                 pension: 'Pensión',
+                 lost_ticket: 'Boleto Extraviado',
+                 lost_ticket_fee_no_original: 'Tarifa por boleto extraviado (sin original)',
+                 withdrawal: 'Retiro',
+                 deposit: 'Depósito',
+                 adjustment: 'Ajuste',
+                 opening_balance: 'Saldo Inicial',
+                 closing_balance: 'Saldo Final'
+               },
                               
-                              // Pension customer translations
-                              pension: {
-                                inactive_customer: 'Cliente de pensión inactivo',
-                                expired_customer: 'Pensión expirada hace {days} días',
-                                valid_customer: 'Pensión válida - {daysRemaining} días restantes',
-                                renewal_required: 'Renovación de pensión requerida',
-                              },
+               // Pension customer translations
+               pension: {
+                 inactive_customer: 'Cliente de pensión inactivo',
+                 expired_customer: 'Pensión expirada hace {days} días',
+                 valid_customer: 'Pensión válida - {daysRemaining} días restantes',
+                 renewal_required: 'Renovación de pensión requerida',
+               },
 
                // Business Logic Errors
                errors: {
@@ -153,15 +171,6 @@ export const esMX: TranslationKey = {
                  connecting: 'Conectando...',
                },
                
-               // Validation Messages
-               validation: {
-                 required_field: 'Campo requerido',
-                 invalid_format: 'Formato inválido',
-                 plate_required: 'Placa requerida',
-                 amount_required: 'Cantidad requerida',
-                 scan_barcode: 'Escanee el código de barras',
-                 enter_plate: 'Ingrese número de placa',
-               },
                
                // Customer Service (Formal 'usted' treatment)
                customer: {
@@ -175,8 +184,8 @@ export const esMX: TranslationKey = {
                  drive_safely: 'Maneja con cuidado',
                  assistance_needed: '¿Necesita asistencia?',
                  call_attendant: 'Llame al encargado',
-                keep_receipt: 'Conserve su recibo',
-                enjoy_service: 'Disfrute nuestro servicio',
+                 keep_receipt: 'Conserve su recibo',
+                 enjoy_service: 'Disfrute nuestro servicio',
                },
                
                // Receipt Templates
@@ -218,9 +227,14 @@ export const esMX: TranslationKey = {
                 pension: 'Pensión',
               },
 
-              // API and Validation Messages
+              // Validation Messages
               validation: {
+                required_field: 'Campo requerido',
+                invalid_format: 'Formato inválido',
                 plate_required: 'Número de placa es requerido',
+                amount_required: 'Cantidad requerida',
+                scan_barcode: 'Escanee el código de barras',
+                enter_plate: 'Ingrese número de placa',
                 plate_too_long: 'Número de placa muy largo (máximo 15 caracteres)',
                 plate_invalid_format: 'Formato de placa inválido (solo A-Z, 0-9, guión)',
                 barcode_too_short: 'Código de barras muy corto (mínimo 3 caracteres)',
@@ -235,20 +249,6 @@ export const esMX: TranslationKey = {
                 request_invalid: 'Datos de solicitud inválidos'
               },
 
-              // Parking Operations
-              parking: {
-                vehicle_already_inside: 'Vehículo ya se encuentra dentro del estacionamiento',
-                entry_successful: 'Entrada registrada exitosamente',
-                ticket_not_found: 'Boleto no encontrado',
-                ticket_already_processed: 'Boleto ya fue procesado',
-                barcode_mismatch: 'Código de barras no coincide',
-                free_period: 'Estacionamiento gratuito - Sin costo',
-                payment_required: 'Pago requerido: {amount}',
-                insufficient_payment: 'Pago insuficiente',
-                payment_successful: 'Pago procesado exitosamente',
-                payment_required_for_exit: 'Debe pagar antes de salir',
-                exit_successful: 'Salida autorizada - Que tenga buen viaje'
-              },
 
               // Authentication
               auth: {
@@ -291,10 +291,6 @@ export const esMX: TranslationKey = {
                 foreign_key_constraint: 'Restricción de integridad de datos'
               },
 
-              // Transaction Types
-              transaction: {
-                parking_payment: 'Pago de estacionamiento'
-              },
 
               // Admin Interface
               // Administration
@@ -353,21 +349,6 @@ export const esMX: TranslationKey = {
                 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
               ],
 
-              // Transaction Types
-              transaction: {
-                parking: 'Estacionamiento',
-                pension: 'Pensión',
-                lost_ticket: 'Boleto Extraviado',
-                lost_ticket_fee: 'Tarifa por boleto extraviado',
-                lost_ticket_fee_no_original: 'Tarifa por boleto extraviado (sin original)',
-                parking_payment: 'Pago de estacionamiento',
-                refund: 'Reembolso',
-                withdrawal: 'Retiro',
-                deposit: 'Depósito',
-                adjustment: 'Ajuste',
-                opening_balance: 'Saldo Inicial',
-                closing_balance: 'Saldo Final'
-              },
 
               // Additional Validation Messages
               validationExtended: {

@@ -33,7 +33,7 @@ export const MoneyAmountSchema = z
 export const EntryRequestSchema = z.object({
   plateNumber: PlateNumberSchema,
   vehicleType: z.enum(['car', 'motorcycle', 'truck']).default('car'),
-  operatorId: z.string().min(1, createMessage('validation.operator_required')),
+  operatorId: z.string().default('OPERATOR_001'), // Default for operator workstation
   notes: z.string().max(500).optional()
 });
 
@@ -86,7 +86,7 @@ export const PaymentRequestSchema = z.object({
   ticketNumber: z.string().min(1, createMessage('validation.ticket_required')),
   barcode: BarcodeSchema.optional(),
   cashReceived: MoneyAmountSchema,
-  operatorId: z.string().min(1, createMessage('validation.operator_required')),
+  operatorId: z.string().default('OPERATOR_001'), // Default for operator workstation
   paymentMethod: z.enum(['efectivo']).default('efectivo')
 });
 

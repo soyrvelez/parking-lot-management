@@ -9,6 +9,8 @@ import { parkingRoutes } from './routes/parking';
 import { adminRoutes } from './routes/admin';
 import { hardwareRoutes } from './routes/hardware';
 import cashRoutes from './routes/cashRoutes';
+import { authRoutes } from './routes/auth';
+import { operatorRoutes } from './routes/operator';
 import { i18n } from '../shared/localization';
 
 const app = express();
@@ -56,9 +58,11 @@ app.get('/health', (req, res) => {
 });
 
 // API routes
-app.use('/api/parking', parkingRoutes);
-app.use('/api/admin', authMiddleware, adminRoutes);
-app.use('/api/hardware', authMiddleware, hardwareRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/operator', operatorRoutes); // No auth required - for locked-down operator workstations
+app.use('/api/parking', parkingRoutes); // No auth required - operator functionality
+app.use('/api/admin', authMiddleware, adminRoutes); // All admin routes require authentication
+app.use('/api/hardware', hardwareRoutes); // No auth required - operator workstations need printer access
 app.use('/api/cash', cashRoutes);
 
 // 404 handler

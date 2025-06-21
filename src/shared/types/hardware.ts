@@ -48,6 +48,8 @@ export interface ReceiptData {
   totalAmount: number;
   paymentMethod?: 'EFECTIVO' | 'PENSION';
   change?: number;
+  cashReceived?: number; // Amount of cash received
+  lostTicketFee?: number; // Fee for lost ticket
   type: 'ENTRY' | 'PAYMENT' | 'LOST_TICKET' | 'PENSION';
   customerName?: string; // For pension customers
   validUntil?: Date; // For pension receipts

@@ -12,9 +12,6 @@ import { z } from 'zod';
 
 const router = Router();
 
-// All admin routes require authentication
-router.use(authMiddleware);
-
 // Validation schemas with Spanish error messages
 const createOperatorSchema = z.object({
   email: z.string().email('Formato de correo electrónico inválido'),
@@ -35,12 +32,12 @@ const updateOperatorSchema = z.object({
 
 /**
  * GET /api/admin/dashboard
- * Real-time dashboard metrics with hardware status
- * Requires: ADMIN role
+ * Full dashboard metrics with admin features
+ * Requires: ADMIN role (applied at router level)
  */
 router.get('/dashboard',
   requireRole('admin'),
-  adminController.getDashboardMetrics
+  (req, res) => adminController.getDashboardMetrics(req, res)
 );
 
 /**
@@ -51,7 +48,7 @@ router.get('/dashboard',
  */
 router.get('/reports/daily',
   requireRole('admin'), // admin can access reports
-  adminController.getDailyReport
+  (req, res) => adminController.getDailyReport(req, res)
 );
 
 /**
@@ -62,7 +59,7 @@ router.get('/reports/daily',
  */
 router.get('/reports/monthly',
   requireRole('admin'),
-  adminController.getMonthlyReport
+  (req, res) => adminController.getMonthlyReport(req, res)
 );
 
 /**
@@ -73,7 +70,7 @@ router.get('/reports/monthly',
  */
 router.get('/audit',
   requireRole('admin'),
-  adminController.getAuditLog
+  (req, res) => adminController.getAuditLog(req, res)
 );
 
 /**
@@ -83,7 +80,7 @@ router.get('/audit',
  */
 router.get('/health',
   requireRole('admin'),
-  adminController.getSystemHealth
+  (req, res) => adminController.getSystemHealth(req, res)
 );
 
 /**
@@ -94,7 +91,7 @@ router.get('/health',
 router.post('/operators',
   requireRole('admin'),
   validateRequest(createOperatorSchema),
-  adminController.createOperator
+  (req, res) => adminController.createOperator(req, res)
 );
 
 /**
@@ -105,7 +102,7 @@ router.post('/operators',
  */
 router.get('/operators',
   requireRole('admin'),
-  adminController.getOperators
+  (req, res) => adminController.getOperators(req, res)
 );
 
 /**
@@ -116,7 +113,7 @@ router.get('/operators',
 router.put('/operators/:id',
   requireRole('admin'),
   validateRequest(updateOperatorSchema),
-  adminController.updateOperator
+  (req, res) => adminController.updateOperator(req, res)
 );
 
 /**

@@ -18,7 +18,10 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
   const [change, setChange] = useState<Decimal | null>(null);
 
   useEffect(() => {
-    calculateAmount();
+    if (ticket) {
+      console.log('PaymentSection received ticket:', ticket);
+      calculateAmount();
+    }
   }, [ticket]);
 
   useEffect(() => {
@@ -34,21 +37,45 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
     }
   }, [paymentAmount, calculatedAmount]);
 
-  const calculateAmount = () => {
-    const entryTime = moment.tz(ticket.entryTime, 'America/Mexico_City');
-    const now = moment.tz('America/Mexico_City');
-    const duration = moment.duration(now.diff(entryTime));
-    const hours = Math.ceil(duration.asHours());
-    
-    const baseRate = new Decimal('20.00');
-    const hourlyRate = new Decimal('15.00');
-    
-    let total = baseRate;
-    if (hours > 1) {
-      total = total.plus(hourlyRate.times(hours - 1));
+  const calculateAmount = async () => {
+    if (!ticket || (!ticket.id && !ticket.ticketNumber)) {
+      setError('Datos del boleto incompletos. Escanee nuevamente.');
+      return;
     }
+
+    const ticketId = ticket.id || ticket.ticketNumber;
     
-    setCalculatedAmount(total);
+    try {
+      const response = await fetch(`/api/parking/calculate/${ticketId}`);
+      const result = await response.json();
+      
+      if (response.ok && result.success) {
+        // Extract total from pricing data
+        const totalStr = result.data.pricing.total.replace('$', '').replace(' MXN', '');
+        setCalculatedAmount(new Decimal(totalStr));
+      } else {
+        // Fallback to basic calculation if API fails
+        const entryTime = moment.tz(ticket.entryTime, 'America/Mexico_City');
+        const now = moment.tz('America/Mexico_City');
+        const duration = moment.duration(now.diff(entryTime));
+        const hours = Math.ceil(duration.asHours());
+        
+        // Use database-seeded rates as fallback
+        const baseRate = new Decimal('25.00'); // Match database minimum rate
+        const hourlyRate = new Decimal('5.00'); // Match database increment rate
+        
+        let total = baseRate;
+        if (hours > 1) {
+          const additionalIncrements = Math.ceil((duration.asMinutes() - 60) / 15);
+          total = total.plus(hourlyRate.times(additionalIncrements));
+        }
+        
+        setCalculatedAmount(total);
+      }
+    } catch (error) {
+      console.error('Error calculating amount:', error);
+      setError('Error al calcular el monto. Intente nuevamente.');
+    }
   };
 
   const formatCurrency = (amount: Decimal | number) => {
@@ -90,9 +117,8 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          ticketId: ticket.id,
-          amountPaid: payment.toString(),
-          paymentMethod: 'CASH',
+          ticketNumber: ticket.id || ticket.ticketNumber,
+          cashReceived: payment.toNumber(),
         }),
       });
 
@@ -122,7 +148,8 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
           onPaymentComplete();
         }, 2000);
       } else {
-        setError(result.error || 'Error al procesar el pago');
+        const errorMessage = result.error?.message || result.message || 'Error al procesar el pago';
+        setError(errorMessage);
       }
     } catch (err) {
       setError('Error de conexión. Verifique la red.');
