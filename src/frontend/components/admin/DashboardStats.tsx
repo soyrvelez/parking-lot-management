@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useAuthenticatedFetch } from '@/hooks/useKeyboardShortcuts';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { Car, DollarSign, Clock, TrendingUp, Users, AlertTriangle } from 'lucide-react';
 import Decimal from 'decimal.js';
 
@@ -22,13 +22,14 @@ export default function DashboardStats() {
     pendingIssues: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
-  const authenticatedFetch = useAuthenticatedFetch();
+  const { authenticatedFetch } = useAdminAuth();
 
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 15000); // Update every 15 seconds
+    // Much less aggressive polling - every 5 minutes in development
+    const interval = setInterval(fetchStats, 5 * 60 * 1000); // Update every 5 minutes
     return () => clearInterval(interval);
-  }, [authenticatedFetch]);
+  }, []); // FIXED: Removed authenticatedFetch dependency to prevent interval explosion
 
   const fetchStats = async () => {
     try {

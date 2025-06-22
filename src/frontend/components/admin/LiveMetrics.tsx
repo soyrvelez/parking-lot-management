@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useAuthenticatedFetch } from '@/hooks/useKeyboardShortcuts';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { RefreshCw } from 'lucide-react';
 import Decimal from 'decimal.js';
@@ -28,13 +28,14 @@ export default function LiveMetrics() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const authenticatedFetch = useAuthenticatedFetch();
+  const { authenticatedFetch } = useAdminAuth();
 
   useEffect(() => {
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 30000); // Update every 30 seconds
+    // Reduced polling frequency for development - every 10 minutes
+    const interval = setInterval(fetchMetrics, 10 * 60 * 1000); // Update every 10 minutes
     return () => clearInterval(interval);
-  }, [authenticatedFetch]);
+  }, []); // FIXED: Removed authenticatedFetch dependency to prevent interval explosion
 
   const fetchMetrics = async () => {
     try {
