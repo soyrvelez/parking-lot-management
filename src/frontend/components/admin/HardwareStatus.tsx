@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Printer, Scan, Database, Wifi, AlertTriangle, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
+import { useAuthenticatedFetch } from '@/hooks/useKeyboardShortcuts';
 
 interface HardwareStatus {
   printer: {
@@ -30,6 +31,7 @@ interface HardwareStatus {
 }
 
 export default function HardwareStatus() {
+  const authenticatedFetch = useAuthenticatedFetch();
   const [status, setStatus] = useState<HardwareStatus>({
     printer: {
       status: 'offline',
@@ -66,13 +68,42 @@ export default function HardwareStatus() {
 
   const fetchHardwareStatus = async () => {
     try {
-      const response = await fetch('/api/admin/hardware/status', {
-        credentials: 'include',
-      });
+      const response = await authenticatedFetch('/api/admin/hardware/status');
 
       if (response.ok) {
-        const hardwareData = await response.json();
-        setStatus(hardwareData);
+        const result = await response.json();
+        if (result.success && result.data) {
+          // Transform the API response to match our interface
+          const transformedStatus: HardwareStatus = {
+            printer: {
+              status: result.data.printer?.status === 'connected' ? 'online' : 'offline',
+              lastCheck: new Date().toISOString(),
+              model: result.data.printer?.model || 'Epson TM-T20III',
+              paperLevel: result.data.printer?.status === 'connected' ? 75 : 0,
+              errorMessage: result.data.printer?.status !== 'connected' ? result.data.printer?.description : undefined,
+            },
+            scanner: {
+              status: result.data.scanner?.status === 'connected' ? 'online' : 'offline', 
+              lastCheck: new Date().toISOString(),
+              model: result.data.scanner?.model || 'Honeywell Voyager 1250g',
+              errorMessage: result.data.scanner?.status !== 'connected' ? result.data.scanner?.description : undefined,
+            },
+            database: {
+              status: result.data.database?.status === 'connected' ? 'online' : 'offline',
+              lastCheck: new Date().toISOString(),
+              responseTime: parseInt(result.data.database?.responseTime?.replace('ms', '') || '0'),
+              connectionCount: result.data.database?.connectionCount || 0,
+            },
+            network: {
+              status: result.data.network?.status === 'connected' ? 'online' : 'offline',
+              lastCheck: new Date().toISOString(),
+              latency: result.data.network?.latency === 'low' ? 15 : result.data.network?.latency === 'medium' ? 50 : 100,
+              quality: result.data.network?.quality === 'excellent' ? 'excellent' : 
+                       result.data.network?.quality === 'good' ? 'good' : 'poor',
+            },
+          };
+          setStatus(transformedStatus);
+        }
       }
     } catch (error) {
       console.error('Error fetching hardware status:', error);

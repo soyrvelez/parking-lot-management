@@ -24,8 +24,15 @@ export default function PensionSection({ onBack }: PensionSectionProps) {
     setCurrentView('lookup');
   };
 
-  const handleRegistrationComplete = () => {
-    setCurrentView('lookup');
+  const handleRegistrationComplete = (newCustomer: any) => {
+    if (newCustomer) {
+      // If customer data is provided, go to payment
+      setSelectedCustomer(newCustomer);
+      setCurrentView('payment');
+    } else {
+      // Otherwise go back to lookup
+      setCurrentView('lookup');
+    }
   };
 
   return (

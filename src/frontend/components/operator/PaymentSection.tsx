@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { DollarSign, ArrowLeft, Printer, Calculator, Clock, AlertCircle, CheckCircle } from 'lucide-react';
-import Decimal from 'decimal.js';
+import { Money } from '../../../shared/utils/money';
 import moment from 'moment-timezone';
+import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 
 interface PaymentSectionProps {
   ticket: any;
@@ -14,8 +15,23 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [calculatedAmount, setCalculatedAmount] = useState<Decimal | null>(null);
-  const [change, setChange] = useState<Decimal | null>(null);
+  const [calculatedAmount, setCalculatedAmount] = useState<Money | null>(null);
+  const [change, setChange] = useState<Money | null>(null);
+
+  // Keyboard shortcuts for payment operations
+  useKeyboardShortcuts({
+    onQuickAmount: (amount) => {
+      addAmount(amount);
+    },
+    onClearAmount: () => {
+      clearAmount();
+    },
+    onConfirmPayment: () => {
+      if (paymentAmount && calculatedAmount && !isProcessing) {
+        handlePayment();
+      }
+    }
+  });
 
   useEffect(() => {
     if (ticket) {
@@ -26,12 +42,15 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
 
   useEffect(() => {
     if (paymentAmount && calculatedAmount) {
-      const payment = new Decimal(paymentAmount || 0);
-      const total = calculatedAmount;
-      
-      if (payment.gte(total)) {
-        setChange(payment.minus(total));
-      } else {
+      try {
+        const payment = Money.fromNumber(parseFloat(paymentAmount) || 0);
+        
+        if (payment.greaterThanOrEqual(calculatedAmount)) {
+          setChange(payment.subtract(calculatedAmount));
+        } else {
+          setChange(null);
+        }
+      } catch (error) {
         setChange(null);
       }
     }
@@ -52,35 +71,57 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
       if (response.ok && result.success) {
         // Extract total from pricing data
         const totalStr = result.data.pricing.total.replace('$', '').replace(' MXN', '');
-        setCalculatedAmount(new Decimal(totalStr));
+        setCalculatedAmount(Money.fromNumber(parseFloat(totalStr)));
       } else {
-        // Fallback to basic calculation if API fails
-        const entryTime = moment.tz(ticket.entryTime, 'America/Mexico_City');
-        const now = moment.tz('America/Mexico_City');
-        const duration = moment.duration(now.diff(entryTime));
-        const hours = Math.ceil(duration.asHours());
-        
-        // Use database-seeded rates as fallback
-        const baseRate = new Decimal('25.00'); // Match database minimum rate
-        const hourlyRate = new Decimal('5.00'); // Match database increment rate
-        
-        let total = baseRate;
-        if (hours > 1) {
-          const additionalIncrements = Math.ceil((duration.asMinutes() - 60) / 15);
-          total = total.plus(hourlyRate.times(additionalIncrements));
+        // Handle specific error cases
+        if (response.status === 409 && result.error?.code === 'TICKET_ALREADY_PROCESSED') {
+          // Ticket is already paid - redirect immediately to scan mode
+          if (result.error.context?.status === 'PAID') {
+            setCalculatedAmount(Money.fromNumber(0));
+            setError('Este boleto ya fue pagado anteriormente.');
+            // Automatically return to scan mode after 1 second
+            setTimeout(() => {
+              onPaymentComplete();
+            }, 1000);
+          } else {
+            setError('Este boleto ya fue procesado.');
+            // Return to scan mode for any processed ticket
+            setTimeout(() => {
+              onPaymentComplete();
+            }, 1000);
+          }
+        } else if (response.status === 404) {
+          setError('Boleto no encontrado. Verifique el código.');
+        } else {
+          // For other errors, try fallback calculation
+          const entryTime = moment.tz(ticket.entryTime, 'America/Mexico_City');
+          const now = moment.tz('America/Mexico_City');
+          const duration = moment.duration(now.diff(entryTime));
+          const hours = Math.ceil(duration.asHours());
+          
+          // Use database-seeded rates as fallback
+          const baseRate = Money.fromNumber(25.00); // Match database minimum rate
+          const hourlyRate = Money.fromNumber(5.00); // Match database increment rate
+          
+          let total = baseRate;
+          if (hours > 1) {
+            const additionalIncrements = Math.ceil((duration.asMinutes() - 60) / 15);
+            total = total.add(hourlyRate.multiply(additionalIncrements));
+          }
+          
+          setCalculatedAmount(total);
         }
-        
-        setCalculatedAmount(total);
       }
     } catch (error) {
       console.error('Error calculating amount:', error);
       setError('Error al calcular el monto. Intente nuevamente.');
+      setCalculatedAmount(null); // Clear calculating state
     }
   };
 
-  const formatCurrency = (amount: Decimal | number) => {
-    const value = amount instanceof Decimal ? amount : new Decimal(amount);
-    return `$${value.toFixed(2)} MXN`;
+  const formatCurrency = (amount: Money | number) => {
+    const value = amount instanceof Money ? amount : Money.fromNumber(amount);
+    return value.formatPesos();
   };
 
   const formatDuration = () => {
@@ -100,9 +141,14 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
   const handlePayment = async () => {
     if (!paymentAmount || !calculatedAmount) return;
 
-    const payment = new Decimal(paymentAmount);
-    if (payment.lt(calculatedAmount)) {
-      setError('El monto pagado es insuficiente');
+    try {
+      const payment = Money.fromNumber(parseFloat(paymentAmount));
+      if (payment.lessThan(calculatedAmount)) {
+        setError('El monto pagado es insuficiente');
+        return;
+      }
+    } catch (error) {
+      setError('Monto de pago inválido');
       return;
     }
 
@@ -118,7 +164,7 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
         },
         body: JSON.stringify({
           ticketNumber: ticket.id || ticket.ticketNumber,
-          cashReceived: payment.toNumber(),
+          cashReceived: parseFloat(paymentAmount),
         }),
       });
 
@@ -136,7 +182,7 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
             },
             body: JSON.stringify({
               ticketId: ticket.id,
-              amountPaid: payment.toString(),
+              amountPaid: paymentAmount,
               change: change?.toString() || '0',
             }),
           });
@@ -144,9 +190,8 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
           console.warn('Error al imprimir recibo:', printError);
         }
 
-        setTimeout(() => {
-          onPaymentComplete();
-        }, 2000);
+        // Call completion immediately to prevent user from accessing paid ticket
+        onPaymentComplete();
       } else {
         const errorMessage = result.error?.message || result.message || 'Error al procesar el pago';
         setError(errorMessage);
@@ -159,9 +204,14 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
   };
 
   const addAmount = (amount: string) => {
-    const current = new Decimal(paymentAmount || 0);
-    const add = new Decimal(amount);
-    setPaymentAmount(current.plus(add).toString());
+    try {
+      const current = Money.fromNumber(parseFloat(paymentAmount) || 0);
+      const add = Money.fromNumber(parseFloat(amount));
+      setPaymentAmount(current.add(add).toString());
+    } catch (error) {
+      // If adding would cause an error, just set the new amount
+      setPaymentAmount(amount);
+    }
   };
 
   const clearAmount = () => {
@@ -185,88 +235,81 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Ticket Information */}
-        <div className="card">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">
-            Información del Boleto
-          </h3>
-          
-          <div className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-gray-600">Placa:</span>
-              <span className="font-mono font-bold">{ticket.plateNumber}</span>
+      <div className="max-w-4xl mx-auto space-y-8">
+        {/* Ticket Information - Compact Top Section */}
+        <div className="card bg-gray-50 border-l-4 border-blue-500">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+            <div>
+              <div className="text-sm text-gray-600">Placa</div>
+              <div className="text-xl font-mono font-bold">{ticket.plateNumber}</div>
             </div>
-            
-            <div className="flex justify-between">
-              <span className="text-gray-600">Entrada:</span>
-              <span>
-                {moment.tz(ticket.entryTime, 'America/Mexico_City').format('DD/MM/YY HH:mm')}
-              </span>
+            <div>
+              <div className="text-sm text-gray-600">Entrada</div>
+              <div className="text-lg font-medium">
+                {moment.tz(ticket.entryTime, 'America/Mexico_City').format('HH:mm')}
+              </div>
             </div>
-            
-            <div className="flex justify-between">
-              <span className="text-gray-600">Tiempo:</span>
-              <span className="flex items-center gap-1">
+            <div>
+              <div className="text-sm text-gray-600">Tiempo</div>
+              <div className="text-lg font-medium flex items-center justify-center gap-1">
                 <Clock className="w-4 h-4" />
                 {formatDuration()}
-              </span>
+              </div>
             </div>
-            
-            <div className="border-t pt-3">
-              <div className="flex justify-between items-center">
-                <span className="text-lg font-semibold">Total a Pagar:</span>
-                <span className="text-2xl font-bold text-green-600">
-                  {calculatedAmount ? formatCurrency(calculatedAmount) : 'Calculando...'}
-                </span>
+            <div>
+              <div className="text-sm text-gray-600">Total</div>
+              <div className="text-2xl font-bold text-green-600">
+                {calculatedAmount !== null ? 
+                  (calculatedAmount.equals(Money.fromNumber(0)) ? 'Pagado' : formatCurrency(calculatedAmount)) 
+                  : 'Calculando...'}
               </div>
             </div>
           </div>
         </div>
 
-        {/* Payment Interface */}
-        <div className="card">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+        {/* Payment Amount Input - Large and Prominent */}
+        <div className="card text-center">
+          <h3 className="text-2xl font-bold text-gray-900 mb-6">
             Monto Recibido
           </h3>
           
-          <div className="space-y-4">
-            <div className="text-center">
-              <input
-                type="number"
-                value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
-                className="input-field text-center text-2xl font-bold"
-                placeholder="0.00"
-                step="0.01"
-                min="0"
-              />
-            </div>
+          <div className="space-y-6">
+            <input
+              type="number"
+              value={paymentAmount}
+              onChange={(e) => setPaymentAmount(e.target.value)}
+              className="input-field-large text-center"
+              placeholder="0.00"
+              step="0.01"
+              min="0"
+            />
 
-            {/* Quick Amount Buttons */}
-            <div className="grid grid-cols-3 gap-2">
-              {['20', '50', '100', '200', '500'].map((amount) => (
+            {/* Quick Amount Buttons - Large and Touch-Friendly */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {['100', '200', '500'].map((amount) => (
                 <button
                   key={amount}
                   onClick={() => addAmount(amount)}
-                  className="btn-secondary py-2 text-sm"
+                  className="btn-success btn-quick-amount text-2xl"
+                  title={`F${amount === '100' ? '5' : amount === '200' ? '6' : '7'}`}
                 >
                   ${amount}
                 </button>
               ))}
               <button
                 onClick={clearAmount}
-                className="btn-danger py-2 text-sm"
+                className="btn-danger btn-quick-amount text-xl"
+                title="F9"
               >
                 Limpiar
               </button>
             </div>
 
-            {change && change.gt(0) && (
-              <div className="bg-blue-50 p-3 rounded-lg">
+            {change && change.greaterThan(Money.zero()) && (
+              <div className="bg-blue-50 p-6 rounded-2xl border-l-4 border-blue-400">
                 <div className="flex justify-between items-center">
-                  <span className="text-blue-800">Cambio:</span>
-                  <span className="text-xl font-bold text-blue-800">
+                  <span className="text-2xl font-bold text-blue-800">Cambio:</span>
+                  <span className="text-3xl font-bold text-blue-800">
                     {formatCurrency(change)}
                   </span>
                 </div>
@@ -274,33 +317,34 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
             )}
 
             {error && (
-              <div className="flex items-center gap-2 text-red-600 bg-red-50 p-3 rounded-lg">
-                <AlertCircle className="w-5 h-5" />
-                <span>{error}</span>
+              <div className="flex items-center gap-4 text-red-600 bg-red-50 p-6 rounded-2xl text-lg">
+                <AlertCircle className="w-8 h-8" />
+                <span className="font-medium">{error}</span>
               </div>
             )}
 
             {success && (
-              <div className="flex items-center gap-2 text-green-600 bg-green-50 p-3 rounded-lg">
-                <CheckCircle className="w-5 h-5" />
-                <span>{success}</span>
+              <div className="flex items-center gap-4 text-green-600 bg-green-50 p-6 rounded-2xl text-lg">
+                <CheckCircle className="w-8 h-8" />
+                <span className="font-medium">{success}</span>
               </div>
             )}
 
             <button
               onClick={handlePayment}
-              disabled={!paymentAmount || !calculatedAmount || isProcessing || new Decimal(paymentAmount || 0).lt(calculatedAmount || 0)}
-              className="btn-primary w-full btn-operator flex items-center justify-center gap-2"
+              disabled={!paymentAmount || !calculatedAmount || isProcessing || (parseFloat(paymentAmount || '0') < (calculatedAmount?.toNumber() || 0))}
+              className="btn-primary w-full btn-payment flex items-center justify-center gap-4"
+              title="F12 o Enter"
             >
               {isProcessing ? (
                 <>
-                  <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
+                  <div className="animate-spin w-8 h-8 border-4 border-white border-t-transparent rounded-full"></div>
                   Procesando...
                 </>
               ) : (
                 <>
-                  <Printer className="w-5 h-5" />
-                  Confirmar Pago
+                  <Printer className="w-8 h-8" />
+                  Confirmar Pago (F12)
                 </>
               )}
             </button>

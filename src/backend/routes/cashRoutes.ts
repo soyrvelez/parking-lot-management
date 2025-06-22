@@ -42,10 +42,24 @@ const countSchema = z.object({
 /**
  * POST /api/cash/open
  * Open cash register for shift
- * Requires: operator role
+ * Requires: operator or admin role
  */
 router.post('/open', 
-  requireRole('operator'),
+  (req, res, next) => {
+    const userRole = (req as any).user?.role;
+    if (userRole === 'admin' || userRole === 'operator') {
+      next();
+    } else {
+      res.status(403).json({
+        success: false,
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'Acceso denegado - requiere rol de operador o administrador',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  },
   validateRequest(openRegisterSchema),
   cashController.openRegister
 );
@@ -53,10 +67,24 @@ router.post('/open',
 /**
  * POST /api/cash/close
  * Close cash register for shift
- * Requires: operator role
+ * Requires: operator or admin role
  */
 router.post('/close',
-  requireRole('operator'), 
+  (req, res, next) => {
+    const userRole = (req as any).user?.role;
+    if (userRole === 'admin' || userRole === 'operator') {
+      next();
+    } else {
+      res.status(403).json({
+        success: false,
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'Acceso denegado - requiere rol de operador o administrador',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  },
   validateRequest(closeRegisterSchema),
   cashController.closeRegister
 );
@@ -76,10 +104,24 @@ router.post('/adjustment',
  * GET /api/cash/status
  * Get current register status
  * Query params: operatorId (required)
- * Requires: operator role
+ * Requires: operator or admin role
  */
 router.get('/status',
-  requireRole('operator'),
+  (req, res, next) => {
+    const userRole = (req as any).user?.role;
+    if (userRole === 'admin' || userRole === 'operator') {
+      next();
+    } else {
+      res.status(403).json({
+        success: false,
+        error: {
+          code: 'INSUFFICIENT_PERMISSIONS',
+          message: 'Acceso denegado - requiere rol de operador o administrador',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  },
   cashController.getStatus
 );
 

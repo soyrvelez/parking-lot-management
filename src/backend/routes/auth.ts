@@ -24,7 +24,7 @@ const developmentUsers = [
   {
     id: 'admin-001',
     username: 'admin',
-    password: '$2b$10$8K.lKb8H9QO5pF8w0vqNTeHx9xQKb8l6pF8w0vqNTeHx9xQKb8l6p', // admin123
+    password: '$2b$10$Xtt30aGVjhyCRw8MLF4lbuihdzrHz6BSAJ09zSBqfgJOw0.d7bh0K', // admin123
     name: 'Administrator',
     role: 'admin' as const
   }
@@ -101,8 +101,8 @@ router.post('/login', validateRequest(loginSchema), async (req, res) => {
   }
 });
 
-// POST /api/auth/verify - Verify token validity
-router.post('/verify', (req, res) => {
+// GET /api/auth/verify - Verify token validity
+router.get('/verify', (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     

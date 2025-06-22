@@ -26,8 +26,8 @@ export default function PensionLookup({ onCustomerFound }: PensionLookupProps) {
   }, [searchQuery]);
 
   const searchCustomers = async () => {
-    const now = Date.now();
-    setLastSearchTime(now);
+    const searchTime = Date.now();
+    setLastSearchTime(searchTime);
     setIsSearching(true);
     setError('');
 
@@ -36,7 +36,7 @@ export default function PensionLookup({ onCustomerFound }: PensionLookupProps) {
       const result = await response.json();
 
       // Only update if this is the most recent search
-      if (now === lastSearchTime) {
+      if (searchTime >= lastSearchTime) {
         if (response.ok) {
           setSearchResults(result.data || []);
         } else {
@@ -45,12 +45,12 @@ export default function PensionLookup({ onCustomerFound }: PensionLookupProps) {
         }
       }
     } catch (err) {
-      if (now === lastSearchTime) {
+      if (searchTime >= lastSearchTime) {
         setError('Error de conexión. Verifique la red.');
         setSearchResults([]);
       }
     } finally {
-      if (now === lastSearchTime) {
+      if (searchTime >= lastSearchTime) {
         setIsSearching(false);
       }
     }

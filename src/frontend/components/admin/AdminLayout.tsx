@@ -53,12 +53,6 @@ const navigation = [
     description: 'Monitoreo de seguridad y eventos'
   },
   {
-    name: 'Gestión de Turnos',
-    href: '/admin/shifts',
-    icon: Clock,
-    description: 'Horarios y rendimiento de operadores'
-  },
-  {
     name: 'Configuración',
     href: '/admin/settings',
     icon: Settings,
@@ -70,12 +64,6 @@ const navigation = [
     icon: Monitor,
     description: 'Estado de impresora y escáner'
   },
-  {
-    name: 'Gestión Operadores',
-    href: '/admin/operators',
-    icon: Users,
-    description: 'Control de acceso de operadores'
-  },
 ];
 
 export default function AdminLayout({ children }: AdminLayoutProps) {
@@ -83,16 +71,20 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const router = useRouter();
 
   const handleLogout = async () => {
-    try {
-      await fetch('/api/admin/auth/logout', {
-        method: 'POST',
-        credentials: 'include',
-      });
-      router.push('/admin/login');
-    } catch (error) {
-      console.error('Error al cerrar sesión:', error);
-    }
-  };
+            try {
+              // For JWT authentication, logout is handled client-side
+              // Clear any local storage/session storage if needed
+              localStorage.removeItem('adminToken');
+              sessionStorage.removeItem('token');
+              
+              router.push('/admin/login');
+            } catch (error) {
+              console.error('Error al cerrar sesión:', error);
+              // Still redirect even if there's an error
+              router.push('/admin/login');
+            }
+          };
+;
 
   return (
     <div className="h-screen flex bg-gray-100">

@@ -12,10 +12,13 @@ const router = Router();
 const pensionController = new PensionController();
 
 // Pension customer lookup by plate number (primary method for operators)
-router.get(
-  '/lookup/:identifier',
-  pensionController.lookupCustomer.bind(pensionController)
-);
+router.get('/lookup/:identifier', async (req, res, next) => {
+  try {
+    await pensionController.lookupCustomer(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Search pension customers by partial plate number
 router.get(

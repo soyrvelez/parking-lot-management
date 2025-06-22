@@ -2,11 +2,10 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import AdminLayout from '@/components/admin/AdminLayout';
 import PricingSettings from '@/components/admin/settings/PricingSettings';
-import OperatorSettings from '@/components/admin/settings/OperatorSettings';
 import SystemSettings from '@/components/admin/settings/SystemSettings';
-import { Settings, DollarSign, Users, Cog } from 'lucide-react';
+import { Settings, DollarSign, Cog } from 'lucide-react';
 
-type SettingsTab = 'pricing' | 'operators' | 'system';
+type SettingsTab = 'pricing' | 'system';
 
 export default function AdminSettings() {
   const router = useRouter();
@@ -20,13 +19,24 @@ export default function AdminSettings() {
 
   const checkAuthentication = async () => {
     try {
-      const response = await fetch('/api/admin/auth/verify', {
+      const token = localStorage.getItem('adminToken');
+      
+      if (!token) {
+        router.push('/admin/login');
+        return;
+      }
+
+      const response = await fetch('/api/auth/verify', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
         credentials: 'include',
       });
 
       if (response.ok) {
         setIsAuthenticated(true);
       } else {
+        localStorage.removeItem('adminToken');
         router.push('/admin/login');
       }
     } catch (error) {
@@ -43,12 +53,6 @@ export default function AdminSettings() {
       name: 'Configuración de Precios',
       icon: DollarSign,
       description: 'Tarifas y reglas de cobro',
-    },
-    {
-      id: 'operators' as SettingsTab,
-      name: 'Gestión de Operadores',
-      icon: Users,
-      description: 'Cuentas y permisos de usuario',
     },
     {
       id: 'system' as SettingsTab,
@@ -109,7 +113,6 @@ export default function AdminSettings() {
         {/* Tab Content */}
         <div className="min-h-[600px]">
           {activeTab === 'pricing' && <PricingSettings />}
-          {activeTab === 'operators' && <OperatorSettings />}
           {activeTab === 'system' && <SystemSettings />}
         </div>
       </div>

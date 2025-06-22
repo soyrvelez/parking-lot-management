@@ -1,15 +1,31 @@
 import { Router } from 'express';
 import { i18n } from '../../shared/localization';
+import { hardwareService } from '../services/hardwareService';
 
 const router = Router();
 
 // Hardware status endpoint
-router.get('/status', (req, res) => {
-  res.json({
-    success: true,
-    message: i18n.t('hardware.status_check'),
-    timestamp: new Date().toISOString()
-  });
+router.get('/status', async (req, res) => {
+  try {
+    const health = await hardwareService.getHardwareHealth();
+    
+    res.json({
+      success: true,
+      message: i18n.t('hardware.status_check'),
+      data: health,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Hardware status error:', error);
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'STATUS_ERROR',
+        message: 'Error al verificar el estado del hardware',
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
 });
 
 // Print ticket endpoint for operator interface

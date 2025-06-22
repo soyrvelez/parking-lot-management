@@ -31,7 +31,7 @@ export default function AdminLogin() {
     setError('');
 
     try {
-      const response = await fetch('/api/admin/auth/login', {
+      const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -43,9 +43,13 @@ export default function AdminLogin() {
       const result = await response.json();
 
       if (response.ok) {
+        // Store the JWT token
+        if (result.data?.token) {
+          localStorage.setItem('adminToken', result.data.token);
+        }
         router.push('/admin');
       } else {
-        setError(result.error || 'Credenciales inválidas');
+        setError(result.error?.message || 'Credenciales inválidas');
       }
     } catch (err) {
       setError('Error de conexión. Verifique la red.');

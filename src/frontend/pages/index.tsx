@@ -5,136 +5,155 @@ import EntrySection from '../components/operator/EntrySection';
 import PaymentSection from '../components/operator/PaymentSection';
 import PensionSection from '../components/operator/PensionSection';
 import StatusDisplay from '../components/operator/StatusDisplay';
+import HardwareStatusIndicator from '../components/operator/HardwareStatusIndicator';
+import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 export default function OperatorInterface() {
   const [currentView, setCurrentView] = useState<'scan' | 'entry' | 'payment' | 'pension'>('scan');
   const [currentTicket, setCurrentTicket] = useState<any>(null);
   const [currentPensionCustomer, setCurrentPensionCustomer] = useState<any>(null);
 
+  // Keyboard shortcuts for operator efficiency
+  useKeyboardShortcuts({
+    onScanMode: () => {
+      setCurrentView('scan');
+      setCurrentTicket(null);
+    },
+    onEntryMode: () => {
+      setCurrentView('entry');
+    },
+    onPensionMode: () => {
+      setCurrentView('pension');
+    },
+    onPaymentMode: () => {
+      if (currentTicket) {
+        setCurrentView('payment');
+      }
+    },
+    onEscape: () => {
+      setCurrentView('scan');
+      setCurrentTicket(null);
+    }
+  });
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-gray-900">
-            Sistema de Estacionamiento
-          </h1>
-          <p className="text-gray-600 mt-1">Interfaz del Operador</p>
+    <div className="h-screen bg-gray-50 flex flex-col">
+      <main className="flex-1 flex flex-col">
+        {/* Navigation Tabs - Always Visible */}
+        <div className="bg-white border-b border-gray-200 px-6 shadow-sm">
+          <nav className="flex space-x-2">
+            <button
+              onClick={() => setCurrentView('scan')}
+              className={`px-8 py-4 text-lg font-medium rounded-t-lg transition-colors ${
+                currentView === 'scan'
+                  ? 'bg-blue-50 text-blue-700 border-b-2 border-blue-700'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Scan className="w-6 h-6" />
+                Escanear
+              </div>
+            </button>
+            
+            <button
+              onClick={() => setCurrentView('entry')}
+              className={`px-8 py-4 text-lg font-medium rounded-t-lg transition-colors ${
+                currentView === 'entry'
+                  ? 'bg-green-50 text-green-700 border-b-2 border-green-700'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Car className="w-6 h-6" />
+                Nueva Entrada
+              </div>
+            </button>
+
+            <button
+              onClick={() => setCurrentView('pension')}
+              className={`px-8 py-4 text-lg font-medium rounded-t-lg transition-colors ${
+                currentView === 'pension'
+                  ? 'bg-emerald-50 text-emerald-700 border-b-2 border-emerald-700'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <div className="flex items-center gap-3">
+                <Users className="w-6 h-6" />
+                Pensión
+              </div>
+            </button>
+
+            {currentTicket && currentTicket.status !== 'PAID' && (
+              <button
+                onClick={() => setCurrentView('payment')}
+                className={`px-8 py-4 text-lg font-medium rounded-t-lg transition-colors ${
+                  currentView === 'payment'
+                    ? 'bg-red-50 text-red-700 border-b-2 border-red-700'
+                    : 'text-gray-500 hover:text-gray-700'
+                } animate-pulse`}
+              >
+                <div className="flex items-center gap-3">
+                  <DollarSign className="w-6 h-6" />
+                  Procesar Pago
+                </div>
+              </button>
+            )}
+          </nav>
         </div>
-      </header>
 
-      <main className="max-w-7xl mx-auto px-4 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Action Area */}
-          <div className="lg:col-span-2">
-            <div className="card">
-              {currentView === 'scan' && (
-                <ScanSection 
-                  onTicketFound={(ticket) => {
-                    setCurrentTicket(ticket);
-                    setCurrentView('payment');
-                  }}
-                  onPensionCustomerFound={(customer) => {
-                    setCurrentPensionCustomer(customer);
-                    setCurrentView('pension');
-                  }}
-                  onSwitchToEntry={() => setCurrentView('entry')}
-                />
-              )}
-              
-              {currentView === 'entry' && (
-                <EntrySection 
-                  onTicketCreated={(ticket) => {
-                    setCurrentTicket(null); // Clear ticket after entry
-                    setCurrentView('scan'); // Go back to scan mode
-                  }}
-                  onBack={() => setCurrentView('scan')}
-                />
-              )}
-              
-              {currentView === 'payment' && currentTicket && (
-                <PaymentSection 
-                  ticket={currentTicket}
-                  onPaymentComplete={() => {
-                    setCurrentTicket(null);
-                    setCurrentView('scan');
-                  }}
-                  onBack={() => setCurrentView('scan')}
-                />
-              )}
+        {/* Main Content Area - Full Width Single Screen */}
+        <div className="flex-1 p-4 bg-gray-50">
+          <div className="max-w-7xl mx-auto">
+            {currentView === 'scan' && (
+              <ScanSection 
+                onTicketFound={(ticket) => {
+                  setCurrentTicket(ticket);
+                  setCurrentView('payment');
+                }}
+                onPensionCustomerFound={(customer) => {
+                  setCurrentPensionCustomer(customer);
+                  setCurrentView('pension');
+                }}
+                onSwitchToEntry={() => setCurrentView('entry')}
+              />
+            )}
+            
+            {currentView === 'entry' && (
+              <EntrySection 
+                onTicketCreated={(ticket) => {
+                  setCurrentTicket(null);
+                  setCurrentView('scan');
+                }}
+                onBack={() => setCurrentView('scan')}
+              />
+            )}
+            
+            {currentView === 'payment' && currentTicket && (
+              <PaymentSection 
+                ticket={currentTicket}
+                onPaymentComplete={() => {
+                  setCurrentTicket(null);
+                  setCurrentView('scan');
+                }}
+                onBack={() => setCurrentView('scan')}
+              />
+            )}
 
-              {currentView === 'pension' && (
-                <PensionSection 
-                  onBack={() => setCurrentView('scan')}
-                />
-              )}
-            </div>
+            {currentView === 'pension' && (
+              <PensionSection 
+                onBack={() => setCurrentView('scan')}
+              />
+            )}
           </div>
+        </div>
 
-          {/* Status and Quick Actions */}
-          <div className="space-y-6">
+        {/* Bottom Status Bar - Compact */}
+        <div className="bg-white border-t border-gray-200 px-6 py-3">
+          <div className="max-w-7xl mx-auto flex items-center justify-between gap-8">
             <StatusDisplay />
-            
-            <div className="card">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Acciones Rápidas
-              </h3>
-              
-              <div className="space-y-3">
-                <button
-                  onClick={() => setCurrentView('scan')}
-                  className="btn-secondary btn-operator w-full flex items-center justify-center gap-3"
-                >
-                  <Scan className="w-5 h-5" />
-                  Escanear Boleto
-                </button>
-                
-                <button
-                  onClick={() => setCurrentView('entry')}
-                  className="btn-primary btn-operator w-full flex items-center justify-center gap-3"
-                >
-                  <Car className="w-5 h-5" />
-                  Nueva Entrada
-                </button>
-
-                <button
-                  onClick={() => setCurrentView('pension')}
-                  className="btn-success btn-operator w-full flex items-center justify-center gap-3"
-                >
-                  <Users className="w-5 h-5" />
-                  Clientes Pensión
-                </button>
-                
-                {currentTicket && (
-                  <button
-                    onClick={() => setCurrentView('payment')}
-                    className="btn-danger btn-operator w-full flex items-center justify-center gap-3"
-                  >
-                    <DollarSign className="w-5 h-5" />
-                    Procesar Pago
-                  </button>
-                )}
-              </div>
-            </div>
-            
-            <div className="card">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                Estado del Sistema
-              </h3>
-              
-              <div className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Impresora:</span>
-                  <span className="text-green-600 font-medium">Conectada</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Escáner:</span>
-                  <span className="text-green-600 font-medium">Listo</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Base de Datos:</span>
-                  <span className="text-green-600 font-medium">Activa</span>
-                </div>
-              </div>
+            <div className="flex-shrink-0">
+              <HardwareStatusIndicator />
             </div>
           </div>
         </div>

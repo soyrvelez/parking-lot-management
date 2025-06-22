@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
-import { Car, Clock, DollarSign, Search, Filter, MoreVertical } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { useAuthenticatedFetch } from '@/hooks/useKeyboardShortcuts';
+import { Car, Clock, DollarSign, Search, Filter, MoreVertical, Eye, CreditCard, AlertTriangle } from 'lucide-react';
 import moment from 'moment-timezone';
 import Decimal from 'decimal.js';
 
@@ -21,8 +22,10 @@ export default function ActiveTickets() {
   const [data, setData] = useState<ActiveTicketsData>({ tickets: [], total: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const [sortBy, setSortBy] = useState<'entryTime' | 'plateNumber' | 'estimatedAmount'>('entryTime');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [showDropdown, setShowDropdown] = useState<string | null>(null);
 
   useEffect(() => {
     fetchActiveTickets();
@@ -30,15 +33,30 @@ export default function ActiveTickets() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showDropdown && dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showDropdown]);
+
+  const authenticatedFetch = useAuthenticatedFetch();
+
   const fetchActiveTickets = async () => {
     try {
-      const response = await fetch('/api/admin/tickets/active', {
-        credentials: 'include',
-      });
+      const response = await authenticatedFetch('/api/admin/tickets/active');
 
       if (response.ok) {
-        const ticketsData = await response.json();
-        setData(ticketsData);
+        const result = await response.json();
+        if (result.success) {
+          setData(result.data);
+        }
       }
     } catch (error) {
       console.error('Error fetching active tickets:', error);
@@ -106,6 +124,169 @@ export default function ActiveTickets() {
       case 'LOST': return 'Perdido';
       default: return status;
     }
+  };
+
+  const handleTicketAction = async (ticketId: string, action: string) => {
+    setShowDropdown(null);
+    
+    try {
+      switch (action) {
+        case 'view':
+          await handleViewTicketDetails(ticketId);
+          break;
+        case 'process-payment':
+          await handleProcessPayment(ticketId);
+          break;
+        case 'mark-lost':
+          await handleMarkAsLost(ticketId);
+          break;
+        default:
+          break;
+      }
+    } catch (error) {
+      console.error('Error handling ticket action:', error);
+      alert('Error al procesar la acción. Intente nuevamente.');
+    }
+  };
+
+  const handleViewTicketDetails = async (ticketId: string) => {
+    try {
+      const response = await authenticatedFetch(`/api/admin/tickets/${ticketId}`);
+      
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          const ticket = result.data.ticket;
+          const transactions = result.data.transactions;
+          
+          let detailsMessage = `DETALLES DEL BOLETO\n\n`;
+          detailsMessage += `Placa: ${ticket.plateNumber}\n`;
+          detailsMessage += `Código: ${ticket.barcode}\n`;
+          detailsMessage += `Entrada: ${moment.tz(ticket.entryTime, 'America/Mexico_City').format('DD/MM/YYYY HH:mm')}\n`;
+          detailsMessage += `Estado: ${getStatusText(ticket.status)}\n`;
+          detailsMessage += `Tarifa Actual: $${ticket.currentFee}\n`;
+          
+          if (ticket.exitTime) {
+            detailsMessage += `Salida: ${moment.tz(ticket.exitTime, 'America/Mexico_City').format('DD/MM/YYYY HH:mm')}\n`;
+          }
+          
+          if (transactions.length > 0) {
+            detailsMessage += `\n--- TRANSACCIONES ---\n`;
+            transactions.forEach((t: any) => {
+              detailsMessage += `${moment.tz(t.timestamp, 'America/Mexico_City').format('DD/MM HH:mm')} - ${t.type}: $${t.amount}\n`;
+            });
+          }
+          
+          alert(detailsMessage);
+        }
+      } else {
+        alert('Error al obtener detalles del boleto');
+      }
+    } catch (error) {
+      console.error('Error fetching ticket details:', error);
+      alert('Error al conectar con el servidor');
+    }
+  };
+
+  const handleProcessPayment = async (ticketId: string) => {
+    const ticket = data.tickets.find(t => t.id === ticketId);
+    if (!ticket) return;
+    
+    try {
+      // Get current ticket details to get accurate fee calculation
+      const detailsResponse = await authenticatedFetch(`/api/admin/tickets/${ticketId}`);
+      if (!detailsResponse.ok) {
+        alert('Error al obtener detalles del boleto');
+        return;
+      }
+      
+      const detailsResult = await detailsResponse.json();
+      if (!detailsResult.success) {
+        alert('Error al obtener detalles del boleto');
+        return;
+      }
+      
+      const currentFee = parseFloat(detailsResult.data.ticket.currentFee);
+      const duration = moment.tz('America/Mexico_City').diff(moment.tz(ticket.entryTime, 'America/Mexico_City'), 'minutes');
+      const hours = Math.ceil(duration / 60);
+      
+      const confirmMessage = `PROCESAR PAGO\n\nPlaca: ${ticket.plateNumber}\nTiempo: ${hours} hora(s)\nTotal a cobrar: $${currentFee.toFixed(2)}\n\n¿Confirmar pago en efectivo?`;
+      
+      if (confirm(confirmMessage)) {
+        const response = await authenticatedFetch(`/api/admin/tickets/${ticketId}/payment`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            paymentMethod: 'CASH',
+            amountPaid: currentFee
+          })
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            alert(`¡Pago procesado exitosamente!\n\nMonto: $${result.data.transaction.amount}\nRecibo: ${result.data.transaction.description}`);
+            // Refresh the data
+            fetchActiveTickets();
+          } else {
+            alert('Error al procesar el pago: ' + result.error.message);
+          }
+        } else {
+          alert('Error al procesar el pago');
+        }
+      }
+    } catch (error) {
+      console.error('Error processing payment:', error);
+      alert('Error al conectar con el servidor');
+    }
+  };
+
+  const handleMarkAsLost = async (ticketId: string) => {
+    const ticket = data.tickets.find(t => t.id === ticketId);
+    if (!ticket) return;
+    
+    try {
+      // Get pricing configuration to show correct lost ticket fee
+      const configResponse = await authenticatedFetch('/api/admin/config/pricing');
+      let lostTicketFee = 50.00; // Default fallback
+      
+      if (configResponse.ok) {
+        const configResult = await configResponse.json();
+        if (configResult.success) {
+          lostTicketFee = parseFloat(configResult.data.lostTicketFee);
+        }
+      }
+      
+      const confirmMessage = `MARCAR COMO PERDIDO\n\nPlaca: ${ticket.plateNumber}\nTarifa por boleto perdido: $${lostTicketFee.toFixed(2)}\n\n¿Confirmar cobro?`;
+      
+      if (confirm(confirmMessage)) {
+        const response = await authenticatedFetch(`/api/admin/tickets/${ticketId}/lost`, {
+          method: 'PUT'
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            alert(`¡Boleto marcado como perdido!\n\nMonto cobrado: $${result.data.transaction.amount}\nRecibo: ${result.data.transaction.description}`);
+            // Refresh the data
+            fetchActiveTickets();
+          } else {
+            alert('Error al marcar como perdido: ' + result.error.message);
+          }
+        } else {
+          alert('Error al marcar como perdido');
+        }
+      }
+    } catch (error) {
+      console.error('Error marking as lost:', error);
+      alert('Error al conectar con el servidor');
+    }
+  };
+
+  const toggleDropdown = (ticketId: string) => {
+    setShowDropdown(showDropdown === ticketId ? null : ticketId);
   };
 
   if (isLoading) {
@@ -198,8 +379,7 @@ export default function ActiveTickets() {
                   </div>
 
                   <div className="text-right">
-                    <div className="flex items-center gap-1 text-lg font-bold text-green-600">
-                      <DollarSign className="w-4 h-4" />
+                    <div className="text-lg font-bold text-green-600">
                       {formatCurrency(ticket.estimatedAmount)}
                     </div>
                     <div className="text-xs text-gray-500">MXN</div>
@@ -209,9 +389,51 @@ export default function ActiveTickets() {
                     {getStatusText(ticket.status)}
                   </div>
 
-                  <button className="p-2 text-gray-400 hover:text-gray-600">
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
+                  <div className="relative" ref={showDropdown === ticket.id ? dropdownRef : null}>
+                    <button 
+                      className="p-2 text-gray-400 hover:text-gray-600"
+                      onClick={() => toggleDropdown(ticket.id)}
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+                    
+                    {showDropdown === ticket.id && (
+                      <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                        <div className="py-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTicketAction(ticket.id, 'view');
+                            }}
+                            className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          >
+                            <Eye className="w-4 h-4" />
+                            Ver Detalles
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTicketAction(ticket.id, 'process-payment');
+                            }}
+                            className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                          >
+                            <CreditCard className="w-4 h-4" />
+                            Procesar Pago
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTicketAction(ticket.id, 'mark-lost');
+                            }}
+                            className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                          >
+                            <AlertTriangle className="w-4 h-4" />
+                            Marcar como Perdido
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

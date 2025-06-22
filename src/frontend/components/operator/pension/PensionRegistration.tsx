@@ -36,7 +36,7 @@ const registrationSchema = z.object({
 type RegistrationForm = z.infer<typeof registrationSchema>;
 
 interface PensionRegistrationProps {
-  onRegistrationComplete: () => void;
+  onRegistrationComplete: (customer?: any) => void;
   onBack: () => void;
 }
 
@@ -86,12 +86,12 @@ export default function PensionRegistration({ onRegistrationComplete, onBack }: 
       const result = await response.json();
 
       if (response.ok) {
-        setSuccess('¡Cliente de pensión registrado exitosamente!');
+        setSuccess('¡Cliente de pensión registrado exitosamente! Redirigiendo a cobro...');
         reset();
         
         setTimeout(() => {
-          onRegistrationComplete();
-        }, 2000);
+          onRegistrationComplete(result.data);
+        }, 1500);
       } else {
         const errorMessage = result.error?.message || result.message || 'Error al registrar cliente';
         setError(errorMessage);

@@ -12,6 +12,9 @@ import { z } from 'zod';
 
 const router = Router();
 
+// Apply authentication middleware to all admin routes  
+router.use(authMiddleware);
+
 // Validation schemas with Spanish error messages
 const createOperatorSchema = z.object({
   email: z.string().email('Formato de correo electrónico inválido'),
@@ -114,6 +117,126 @@ router.put('/operators/:id',
   requireRole('admin'),
   validateRequest(updateOperatorSchema),
   (req, res) => adminController.updateOperator(req, res)
+);
+
+/**
+ * GET /api/admin/tickets/active
+ * List all active tickets in the parking lot
+ * Requires: ADMIN role
+ */
+router.get('/tickets/active',
+  requireRole('admin'),
+  (req, res) => adminController.getActiveTickets(req, res)
+);
+
+/**
+ * GET /api/admin/tickets/:id
+ * Get detailed information for a specific ticket
+ * Requires: ADMIN role
+ */
+router.get('/tickets/:id',
+  requireRole('admin'),
+  (req, res) => adminController.getTicketDetails(req, res)
+);
+
+/**
+ * PUT /api/admin/tickets/:id/payment
+ * Process payment for a specific ticket
+ * Requires: ADMIN role
+ */
+router.put('/tickets/:id/payment',
+  requireRole('admin'),
+  (req, res) => adminController.processTicketPayment(req, res)
+);
+
+/**
+ * PUT /api/admin/tickets/:id/lost
+ * Mark a ticket as lost and apply lost ticket fee
+ * Requires: ADMIN role
+ */
+router.put('/tickets/:id/lost',
+  requireRole('admin'),
+  (req, res) => adminController.markTicketAsLost(req, res)
+);
+
+/**
+ * GET /api/admin/transactions/recent
+ * Get recent transactions for dashboard
+ * Requires: ADMIN role
+ */
+router.get('/transactions/recent',
+  requireRole('admin'),
+  (req, res) => adminController.getRecentTransactions(req, res)
+);
+
+/**
+ * GET /api/admin/reports/summary
+ * Get report summary data
+ * Requires: ADMIN role
+ */
+router.get('/reports/summary',
+  requireRole('admin'),
+  (req, res) => adminController.getReportSummary(req, res)
+);
+
+/**
+ * GET /api/admin/reports/charts
+ * Get chart data for reports
+ * Requires: ADMIN role
+ */
+router.get('/reports/charts',
+  requireRole('admin'),
+  (req, res) => adminController.getReportCharts(req, res)
+);
+
+/**
+ * GET /api/admin/reports/transactions
+ * Get transaction history for reports
+ * Requires: ADMIN role
+ */
+router.get('/reports/transactions',
+  requireRole('admin'),
+  (req, res) => adminController.getReportTransactions(req, res)
+);
+
+/**
+ * GET /api/admin/hardware/status
+ * Get hardware status information
+ * Requires: ADMIN role
+ */
+router.get('/hardware/status',
+  requireRole('admin'),
+  (req, res) => adminController.getHardwareStatus(req, res)
+);
+
+/**
+ * GET /api/admin/config/pricing
+ * Get current pricing configuration
+ * Requires: ADMIN role
+ */
+router.get('/config/pricing',
+  requireRole('admin'),
+  (req, res) => adminController.getPricingConfig(req, res)
+);
+
+/**
+ * PUT /api/admin/config/pricing
+ * Update pricing configuration
+ * Requires: ADMIN role
+ */
+router.put('/config/pricing',
+  requireRole('admin'),
+  (req, res) => adminController.updatePricingConfig(req, res)
+);
+
+/**
+ * GET /api/admin/metrics/hourly
+ * Get hourly metrics for charts and analytics
+ * Requires: ADMIN role
+ */
+router.get('/metrics/hourly',
+  requireRole('admin'),
+  (req, res) => adminController.getHourlyMetrics(req, res)
 );
 
 /**

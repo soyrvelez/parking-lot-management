@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAuthenticatedFetch } from '@/hooks/useKeyboardShortcuts';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
 import { RefreshCw } from 'lucide-react';
 import Decimal from 'decimal.js';
@@ -27,25 +28,60 @@ export default function LiveMetrics() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const authenticatedFetch = useAuthenticatedFetch();
 
   useEffect(() => {
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 30000); // Update every 30 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [authenticatedFetch]);
 
   const fetchMetrics = async () => {
     try {
-      const response = await fetch('/api/admin/dashboard/live-metrics', {
-        credentials: 'include',
-      });
+      const response = await authenticatedFetch('/api/admin/metrics/hourly');
 
       if (response.ok) {
-        const metricsData = await response.json();
-        setData(metricsData);
+        const result = await response.json();
+        if (result.success && result.data) {
+          const { hourlyData, revenueData, lastUpdated } = result.data;
+          
+          setData({
+            hourlyData: hourlyData || [],
+            revenueData: revenueData || [],
+            lastUpdated: lastUpdated || new Date().toISOString(),
+          });
+        }
+      } else {
+        // Fallback to dashboard endpoint if hourly metrics fails
+        console.warn('Hourly metrics endpoint failed, using basic dashboard data');
+        const dashboardResponse = await authenticatedFetch('/api/admin/dashboard');
+        if (dashboardResponse.ok) {
+          // Set empty data rather than mock data
+          setData({
+            hourlyData: Array.from({ length: 24 }, (_, hour) => ({
+              hour: hour.toString().padStart(2, '0'),
+              entries: 0,
+              exits: 0,
+              revenue: 0,
+            })),
+            revenueData: [],
+            lastUpdated: new Date().toISOString(),
+          });
+        }
       }
     } catch (error) {
       console.error('Error fetching live metrics:', error);
+      // Set empty data on error instead of mock data
+      setData({
+        hourlyData: Array.from({ length: 24 }, (_, hour) => ({
+          hour: hour.toString().padStart(2, '0'),
+          entries: 0,
+          exits: 0,
+          revenue: 0,
+        })),
+        revenueData: [],
+        lastUpdated: new Date().toISOString(),
+      });
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);

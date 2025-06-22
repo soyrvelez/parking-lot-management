@@ -79,72 +79,62 @@ export default function StatusDisplay() {
 
   if (isLoading) {
     return (
-      <div className="card">
-        <div className="animate-pulse space-y-4">
-          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-          <div className="space-y-2">
-            <div className="h-3 bg-gray-200 rounded"></div>
-            <div className="h-3 bg-gray-200 rounded w-5/6"></div>
-          </div>
+      <div className="flex items-center gap-6">
+        <div className="animate-pulse flex items-center gap-2">
+          <div className="h-4 w-4 bg-gray-200 rounded"></div>
+          <div className="h-4 bg-gray-200 rounded w-16"></div>
+          <div className="h-4 bg-gray-200 rounded w-20"></div>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="animate-pulse h-8 bg-gray-200 rounded-lg w-24"></div>
+          <div className="animate-pulse h-8 bg-gray-200 rounded-lg w-28"></div>
+          <div className="animate-pulse h-8 bg-gray-200 rounded-lg w-32"></div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="card">
-      <div className="flex items-center gap-2 mb-4">
-        <Activity className="w-5 h-5 text-primary-600" />
-        <h3 className="text-lg font-semibold text-gray-900">
-          Estado Actual
-        </h3>
+    <div className="flex items-center gap-6">
+      {/* System Status Indicator */}
+      <div className="flex items-center gap-2">
+        <Activity className="w-4 h-4 text-primary-600" />
+        <span className="text-sm text-gray-600">Sistema:</span>
+        <span className={`text-sm font-medium ${getStatusColor(stats.systemStatus)}`}>
+          {getStatusText(stats.systemStatus)}
+        </span>
       </div>
 
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <span className="text-gray-600">Sistema:</span>
-          <span className={`font-medium ${getStatusColor(stats.systemStatus)}`}>
-            {getStatusText(stats.systemStatus)}
-          </span>
+      {/* Horizontal Stats Cards */}
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 bg-blue-50 px-3 py-2 rounded-lg">
+          <Car className="w-4 h-4 text-blue-600" />
+          <div className="flex items-center gap-1">
+            <span className="text-sm text-blue-800">Activos:</span>
+            <span className="text-lg font-bold text-blue-900">{stats.activeTickets}</span>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3">
-          <div className="bg-blue-50 p-3 rounded-lg">
-            <div className="flex items-center gap-2 mb-1">
-              <Car className="w-4 h-4 text-blue-600" />
-              <span className="text-sm text-blue-800">Vehículos Activos</span>
-            </div>
-            <span className="text-2xl font-bold text-blue-900">
-              {stats.activeTickets}
-            </span>
+        <div className="flex items-center gap-2 bg-green-50 px-3 py-2 rounded-lg">
+          <DollarSign className="w-4 h-4 text-green-600" />
+          <div className="flex items-center gap-1">
+            <span className="text-sm text-green-800">Hoy:</span>
+            <span className="text-sm font-bold text-green-900">{formatCurrency(stats.todayRevenue)}</span>
           </div>
+        </div>
 
-          <div className="bg-green-50 p-3 rounded-lg">
-            <div className="flex items-center gap-2 mb-1">
-              <DollarSign className="w-4 h-4 text-green-600" />
-              <span className="text-sm text-green-800">Ingresos Hoy</span>
-            </div>
-            <span className="text-lg font-bold text-green-900">
-              {formatCurrency(stats.todayRevenue)}
-            </span>
-          </div>
-
-          <div className="bg-purple-50 p-3 rounded-lg">
-            <div className="flex items-center gap-2 mb-1">
-              <Clock className="w-4 h-4 text-purple-600" />
-              <span className="text-sm text-purple-800">Estancia Promedio</span>
-            </div>
-            <span className="text-lg font-bold text-purple-900">
-              {stats.averageStay}
-            </span>
+        <div className="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-lg">
+          <Clock className="w-4 h-4 text-purple-600" />
+          <div className="flex items-center gap-1">
+            <span className="text-sm text-purple-800">Promedio:</span>
+            <span className="text-sm font-bold text-purple-900">{stats.averageStay}</span>
           </div>
         </div>
       </div>
 
-      <div className="mt-4 pt-4 border-t border-gray-200">
-        <div className="text-xs text-gray-500 text-center">
-          Actualizado cada 30 segundos
-        </div>
+      {/* Last Updated */}
+      <div className="text-xs text-gray-400 ml-auto">
+        Actualizado cada 30s
       </div>
     </div>
   );

@@ -18,13 +18,24 @@ export default function AdminDashboard() {
 
   const checkAuthentication = async () => {
     try {
-      const response = await fetch('/api/admin/auth/verify', {
+      const token = localStorage.getItem('adminToken');
+      
+      if (!token) {
+        router.push('/admin/login');
+        return;
+      }
+
+      const response = await fetch('/api/auth/verify', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
         credentials: 'include',
       });
 
       if (response.ok) {
         setIsAuthenticated(true);
       } else {
+        localStorage.removeItem('adminToken');
         router.push('/admin/login');
       }
     } catch (error) {

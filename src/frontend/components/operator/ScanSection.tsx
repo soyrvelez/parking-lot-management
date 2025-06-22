@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Scan, AlertCircle, Clock } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Scan, AlertCircle, Clock, CheckCircle } from 'lucide-react';
 
 interface ScanSectionProps {
   onTicketFound: (ticket: any) => void;
@@ -11,18 +11,41 @@ export default function ScanSection({ onTicketFound, onPensionCustomerFound, onS
   const [scannedCode, setScannedCode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [lastScanTime, setLastScanTime] = useState<Date | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    const handleKeyPress = (event: KeyboardEvent) => {
-      if (event.key === 'Enter' && scannedCode) {
-        handleScan();
-      } else if (event.key.length === 1) {
-        setScannedCode(prev => prev + event.key);
-      }
-    };
+    // Focus scanner input on mount
+    inputRef.current?.focus();
+  }, []);
 
-    window.addEventListener('keypress', handleKeyPress);
-    return () => window.removeEventListener('keypress', handleKeyPress);
+  useEffect(() => {
+    // Clear success message after 3 seconds
+    if (success) {
+      const timer = setTimeout(() => setSuccess(''), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [success]);
+
+  useEffect(() => {
+    // Clear error message after 5 seconds
+    if (error) {
+      const timer = setTimeout(() => setError(''), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
+
+  // Auto-submit when barcode scanner completes (detects rapid input)
+  useEffect(() => {
+    if (scannedCode.length >= 8) {
+      const timer = setTimeout(() => {
+        if (scannedCode.trim()) {
+          handleScan();
+        }
+      }, 100); // Small delay to ensure complete scan
+      return () => clearTimeout(timer);
+    }
   }, [scannedCode]);
 
   const handleScan = async () => {
@@ -30,16 +53,29 @@ export default function ScanSection({ onTicketFound, onPensionCustomerFound, onS
     
     setIsScanning(true);
     setError('');
+    setSuccess('');
+    setLastScanTime(new Date());
     
     try {
+      // Visual feedback - flash the input
+      if (inputRef.current) {
+        inputRef.current.classList.add('ring-4', 'ring-blue-400', 'ring-opacity-75');
+        setTimeout(() => {
+          inputRef.current?.classList.remove('ring-4', 'ring-blue-400', 'ring-opacity-75');
+        }, 300);
+      }
+
       // First try to find regular parking ticket
       let response = await fetch(`/api/parking/tickets/lookup/${scannedCode}`);
       let result = await response.json();
       
       if (response.ok && result.data) {
         // Found regular ticket
+        setSuccess('¡Boleto encontrado!');
         console.log('Found ticket data:', result.data);
-        onTicketFound(result.data);
+        setTimeout(() => {
+          onTicketFound(result.data);
+        }, 500); // Brief delay for user feedback
         return;
       }
       
@@ -49,8 +85,11 @@ export default function ScanSection({ onTicketFound, onPensionCustomerFound, onS
       
       if (response.ok && result.data) {
         // Found pension customer
+        setSuccess('¡Cliente de pensión encontrado!');
         console.log('Found pension customer:', result.data);
-        onPensionCustomerFound(result.data);
+        setTimeout(() => {
+          onPensionCustomerFound(result.data);
+        }, 500); // Brief delay for user feedback
         return;
       }
       
@@ -58,11 +97,19 @@ export default function ScanSection({ onTicketFound, onPensionCustomerFound, onS
       const errorMessage = result.error?.message || result.message || 'Boleto o cliente de pensión no encontrado';
       setError(errorMessage);
       
+      // Vibrate pattern for error (if supported)
+      if ('vibrate' in navigator) {
+        navigator.vibrate([100, 50, 100]);
+      }
+      
     } catch (err) {
       setError('Error de conexión. Verifique la red.');
     } finally {
       setIsScanning(false);
-      setScannedCode('');
+      setTimeout(() => {
+        setScannedCode('');
+        inputRef.current?.focus();
+      }, 100);
     }
   };
 
@@ -80,53 +127,80 @@ export default function ScanSection({ onTicketFound, onPensionCustomerFound, onS
         </p>
       </div>
 
-      <div className="max-w-md mx-auto space-y-4">
+      <div className="max-w-4xl mx-auto space-y-8">
         <div className="relative">
           <input
+            ref={inputRef}
             type="text"
             value={scannedCode}
             onChange={(e) => setScannedCode(e.target.value)}
-            className="input-field text-center text-lg font-mono"
-            placeholder="Código del boleto"
+            onKeyPress={(e) => {
+              if (e.key === 'Enter' && scannedCode.trim()) {
+                handleScan();
+              }
+            }}
+            className="scanner-input transition-all duration-300"
+            placeholder="Escanee o ingrese código"
             autoFocus
             disabled={isScanning}
           />
           {isScanning && (
-            <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
-              <div className="animate-spin w-5 h-5 border-2 border-primary-600 border-t-transparent rounded-full"></div>
+            <div className="absolute right-6 top-1/2 transform -translate-y-1/2">
+              <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full"></div>
+            </div>
+          )}
+          {scannedCode && !isScanning && (
+            <div className="absolute right-6 top-1/2 transform -translate-y-1/2 text-blue-600">
+              <span className="text-sm font-medium">Presione Enter</span>
             </div>
           )}
         </div>
 
-        {error && (
-          <div className="flex items-center gap-2 text-red-600 bg-red-50 p-3 rounded-lg">
-            <AlertCircle className="w-5 h-5" />
-            <span>{error}</span>
+        {/* Success Message */}
+        {success && (
+          <div className="flex items-center gap-4 text-green-600 bg-green-50 p-6 rounded-2xl text-lg animate-pulse">
+            <CheckCircle className="w-8 h-8" />
+            <span className="font-medium">{success}</span>
           </div>
         )}
 
-        <div className="flex gap-3">
+        {/* Error Message */}
+        {error && (
+          <div className="flex items-center gap-4 text-red-600 bg-red-50 p-6 rounded-2xl text-lg">
+            <AlertCircle className="w-8 h-8" />
+            <span className="font-medium">{error}</span>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <button
             onClick={handleScan}
             disabled={!scannedCode.trim() || isScanning}
-            className="btn-primary flex-1 flex items-center justify-center gap-2"
+            className="btn-primary btn-operator flex items-center justify-center gap-4"
           >
-            <Scan className="w-5 h-5" />
+            <Scan className="w-8 h-8" />
             {isScanning ? 'Buscando...' : 'Buscar Boleto'}
           </button>
           
           <button
             onClick={onSwitchToEntry}
-            className="btn-secondary flex items-center justify-center gap-2"
+            className="btn-secondary btn-operator flex items-center justify-center gap-4"
           >
-            <Clock className="w-5 h-5" />
+            <Clock className="w-8 h-8" />
             Nueva Entrada
           </button>
         </div>
       </div>
 
-      <div className="mt-8 text-sm text-gray-500">
-        <p>💡 El escáner se conecta automáticamente cuando está disponible</p>
+      <div className="mt-8 space-y-2">
+        <div className="text-sm text-gray-500">
+          <p>💡 El escáner se conecta automáticamente cuando está disponible</p>
+        </div>
+        {lastScanTime && (
+          <div className="text-xs text-gray-400">
+            Último escaneo: {lastScanTime.toLocaleTimeString('es-MX')}
+          </div>
+        )}
       </div>
     </div>
   );

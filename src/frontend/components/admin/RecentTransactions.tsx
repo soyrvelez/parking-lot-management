@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DollarSign, Car, AlertCircle, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import { useAuthenticatedFetch } from '@/hooks/useKeyboardShortcuts';
 import moment from 'moment-timezone';
 import Decimal from 'decimal.js';
 
@@ -20,6 +21,7 @@ interface RecentTransactionsData {
 }
 
 export default function RecentTransactions() {
+  const authenticatedFetch = useAuthenticatedFetch();
   const [data, setData] = useState<RecentTransactionsData>({
     transactions: [],
     totalToday: '0.00',
@@ -37,13 +39,38 @@ export default function RecentTransactions() {
 
   const fetchTransactions = async () => {
     try {
-      const response = await fetch('/api/admin/transactions/recent', {
-        credentials: 'include',
-      });
+      const response = await authenticatedFetch('/api/admin/transactions/recent?limit=10');
 
       if (response.ok) {
-        const transactionsData = await response.json();
-        setData(transactionsData);
+        const result = await response.json();
+        if (result.success && result.data) {
+          // Transform the backend response to match component interface
+          const transactions = result.data.transactions.map((transaction: any) => ({
+            id: transaction.id,
+            type: transaction.type,
+            amount: transaction.amount,
+            plateNumber: transaction.ticket?.plateNumber || transaction.pension?.plateNumber,
+            timestamp: transaction.timestamp,
+            description: transaction.description
+          }));
+
+          // Calculate summary stats
+          const totalAmount = transactions.reduce((sum: Decimal, t: any) => {
+            const amount = new Decimal(t.amount);
+            return t.type === 'REFUND' ? sum.minus(amount) : sum.plus(amount);
+          }, new Decimal(0));
+
+          const avgAmount = transactions.length > 0 
+            ? totalAmount.dividedBy(transactions.length) 
+            : new Decimal(0);
+
+          setData({
+            transactions,
+            totalToday: totalAmount.toFixed(2),
+            transactionCount: transactions.length,
+            avgTransaction: avgAmount.toFixed(2)
+          });
+        }
       }
     } catch (error) {
       console.error('Error fetching recent transactions:', error);

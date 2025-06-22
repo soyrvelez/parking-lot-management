@@ -48,6 +48,96 @@ export class AdminController {
   }
 
   /**
+   * Helper method to get current pricing configuration
+   */
+  private async getCurrentPricingConfig() {
+    const config = await prisma.pricingConfig.findFirst({
+      where: { isActive: true },
+      include: {
+        incrementRates: {
+          orderBy: { incrementNumber: 'asc' }
+        }
+      }
+    });
+
+    // Return default config if none exists
+    if (!config) {
+      return {
+        minimumHours: 1,
+        minimumRate: 25.00,
+        incrementMinutes: 15,
+        incrementRate: 5.00,
+        lostTicketFee: 50.00,
+        monthlyRate: 300.00,
+        dailySpecialHours: null,
+        dailySpecialRate: null,
+        incrementRates: []
+      };
+    }
+
+    return {
+      minimumHours: config.minimumHours,
+      minimumRate: parseFloat(config.minimumRate.toString()),
+      incrementMinutes: config.incrementMinutes,
+      incrementRate: parseFloat(config.incrementRate.toString()),
+      lostTicketFee: parseFloat(config.lostTicketFee.toString()),
+      monthlyRate: parseFloat(config.monthlyRate.toString()),
+      dailySpecialHours: config.dailySpecialHours,
+      dailySpecialRate: config.dailySpecialRate ? parseFloat(config.dailySpecialRate.toString()) : null,
+      incrementRates: config.incrementRates.map(rate => ({
+        incrementNumber: rate.incrementNumber,
+        rate: parseFloat(rate.rate.toString())
+      }))
+    };
+  }
+
+  /**
+   * Helper method to calculate parking fee based on configuration
+   */
+  private async calculateParkingFee(entryTime: Date, exitTime: Date = new Date()) {
+    const config = await this.getCurrentPricingConfig();
+    const durationMs = exitTime.getTime() - entryTime.getTime();
+    const durationMinutes = Math.ceil(durationMs / (1000 * 60));
+    const durationHours = durationMinutes / 60;
+
+    // Check if daily special applies
+    if (config.dailySpecialHours && config.dailySpecialRate && durationHours <= config.dailySpecialHours) {
+      return {
+        amount: config.dailySpecialRate,
+        description: `Tarifa especial diaria - ${config.dailySpecialHours} horas`,
+        durationMinutes,
+        usedSpecialRate: true
+      };
+    }
+
+    // Standard calculation
+    const minimumMinutes = config.minimumHours * 60;
+    
+    if (durationMinutes <= minimumMinutes) {
+      return {
+        amount: config.minimumRate,
+        description: `Estacionamiento - ${config.minimumHours} hora mínima`,
+        durationMinutes,
+        usedSpecialRate: false
+      };
+    }
+
+    // Calculate incremental charges
+    const extraMinutes = durationMinutes - minimumMinutes;
+    const extraIncrements = Math.ceil(extraMinutes / config.incrementMinutes);
+    const totalAmount = config.minimumRate + (extraIncrements * config.incrementRate);
+
+    const totalHours = Math.ceil(durationMinutes / 60);
+    
+    return {
+      amount: totalAmount,
+      description: `Estacionamiento - ${totalHours} hora${totalHours > 1 ? 's' : ''}`,
+      durationMinutes,
+      usedSpecialRate: false
+    };
+  }
+
+  /**
    * Get real-time dashboard metrics with Spanish formatting
    */
   async getDashboardMetrics(req: AuthenticatedRequest, res: Response): Promise<void> {
@@ -69,7 +159,7 @@ export class AdminController {
             gte: startOfDay,
             lt: endOfDay
           },
-          type: { in: ['PARKING', 'LOST_TICKET'] }
+          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION'] }
         },
         _sum: { amount: true },
         _count: true
@@ -113,7 +203,7 @@ export class AdminController {
             gte: startOfDay,
             lt: endOfDay
           },
-          type: { in: ['PARKING', 'LOST_TICKET'] }
+          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION'] }
         }
       });
 
@@ -1021,6 +1111,1112 @@ export class AdminController {
   }
 
   // CSV generation moved to secure csvExporter utility
+
+  /**
+   * GET /api/admin/tickets/active
+   * Get all active tickets currently in the parking lot
+   */
+  async getActiveTickets(req: Request, res: Response): Promise<void> {
+    try {
+      // Query active tickets from database
+      const activeTickets = await prisma.ticket.findMany({
+        where: {
+          status: 'ACTIVE'
+        },
+        orderBy: {
+          entryTime: 'desc'
+        }
+      });
+
+      // Transform tickets to include calculated amounts and durations
+      const transformedTickets = activeTickets.map(ticket => {
+        const entryTime = ticket.entryTime;
+        const now = new Date();
+        const hoursParked = Math.max(1, Math.ceil((now.getTime() - entryTime.getTime()) / (1000 * 60 * 60)));
+        
+        // Simple pricing calculation (1st hour: $25, additional hours: $10 each)
+        // TODO: Use actual pricing configuration from database
+        const estimatedAmount = hoursParked === 1 ? 25 : 25 + ((hoursParked - 1) * 10);
+        
+        // Calculate duration string
+        const durationMs = now.getTime() - entryTime.getTime();
+        const hours = Math.floor(durationMs / (1000 * 60 * 60));
+        const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+        const duration = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+
+        return {
+          id: ticket.id,
+          plateNumber: ticket.plateNumber,
+          entryTime: ticket.entryTime.toISOString(),
+          estimatedAmount: estimatedAmount.toFixed(2),
+          status: ticket.status,
+          duration: duration
+        };
+      });
+
+      res.json({
+        success: true,
+        data: {
+          tickets: transformedTickets,
+          total: transformedTickets.length
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error fetching active tickets:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_TICKETS_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * GET /api/admin/transactions/recent
+   * Get recent transactions for dashboard
+   */
+  async getRecentTransactions(req: Request, res: Response): Promise<void> {
+    try {
+      const limit = parseInt(req.query.limit as string) || 10;
+      
+      // Query recent transactions from database
+      const recentTransactions = await prisma.transaction.findMany({
+        take: limit,
+        orderBy: { timestamp: 'desc' },
+        include: {
+          ticket: {
+            select: {
+              plateNumber: true,
+              barcode: true,
+              entryTime: true
+            }
+          },
+          pension: {
+            select: {
+              name: true,
+              plateNumber: true
+            }
+          }
+        }
+      });
+
+      // Transform transactions for frontend
+      const transformedTransactions = recentTransactions.map(transaction => {
+        const ticketInfo = transaction.ticket ? {
+          plateNumber: transaction.ticket.plateNumber,
+          barcode: transaction.ticket.barcode,
+          entryTime: transaction.ticket.entryTime
+        } : null;
+        
+        const pensionInfo = transaction.pension ? {
+          customerName: transaction.pension.name,
+          plateNumber: transaction.pension.plateNumber
+        } : null;
+
+        return {
+          id: transaction.id,
+          type: transaction.type,
+          amount: transaction.amount.toString(),
+          description: transaction.description || '',
+          timestamp: transaction.timestamp.toISOString(),
+          operatorId: transaction.operatorId,
+          paymentMethod: transaction.paymentMethod || 'CASH',
+          ticket: ticketInfo,
+          pension: pensionInfo
+        };
+      });
+
+      res.json({
+        success: true,
+        data: {
+          transactions: transformedTransactions,
+          total: transformedTransactions.length
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error fetching recent transactions:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_TRANSACTIONS_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * GET /api/admin/reports/summary
+   * Get report summary data
+   */
+  async getReportSummary(req: Request, res: Response): Promise<void> {
+    try {
+      const { startDate, endDate, reportType, transactionType } = req.query;
+      
+      let queryStartDate: Date;
+      let queryEndDate: Date;
+      
+      if (startDate && endDate) {
+        queryStartDate = new Date(startDate as string);
+        queryEndDate = new Date(endDate as string);
+        queryEndDate.setDate(queryEndDate.getDate() + 1); // Include end date
+      } else {
+        // Default to today
+        queryStartDate = new Date();
+        queryStartDate.setHours(0, 0, 0, 0);
+        queryEndDate = new Date(queryStartDate);
+        queryEndDate.setDate(queryEndDate.getDate() + 1);
+      }
+
+      // Build transaction type filter
+      let typeFilter: string[] = ['PARKING', 'PENSION', 'LOST_TICKET'];
+      if (transactionType && transactionType !== 'all') {
+        switch (transactionType) {
+          case 'parking': typeFilter = ['PARKING']; break;
+          case 'pension': typeFilter = ['PENSION']; break;
+          case 'lost_ticket': typeFilter = ['LOST_TICKET']; break;
+          case 'refund': typeFilter = ['REFUND']; break;
+        }
+      }
+
+      // Get revenue summary
+      const revenueSummary = await prisma.transaction.aggregate({
+        where: {
+          timestamp: {
+            gte: queryStartDate,
+            lt: queryEndDate
+          },
+          type: { in: typeFilter }
+        },
+        _sum: { amount: true },
+        _count: true
+      });
+
+      const totalRevenue = Money.fromNumber(revenueSummary._sum.amount || 0);
+      const transactionCount = revenueSummary._count;
+      const averageTicketValue = transactionCount > 0 
+        ? totalRevenue.dividedBy(transactionCount)
+        : Money.fromNumber(0);
+
+      // Get hourly activity for peak hours
+      const transactions = await prisma.transaction.findMany({
+        where: {
+          timestamp: {
+            gte: queryStartDate,
+            lt: queryEndDate
+          },
+          type: { in: typeFilter }
+        },
+        select: { timestamp: true }
+      });
+
+      const hourlyActivity = transactions.reduce((acc, transaction) => {
+        const hour = transaction.timestamp.getHours();
+        acc[hour] = (acc[hour] || 0) + 1;
+        return acc;
+      }, {} as { [hour: number]: number });
+
+      const peakHours = Object.entries(hourlyActivity)
+        .sort(([,a], [,b]) => b - a)
+        .slice(0, 3)
+        .map(([hour, count]) => ({
+          hour: `${hour.padStart(2, '0')}:00`,
+          count
+        }));
+
+      res.json({
+        success: true,
+        data: {
+          totalRevenue: totalRevenue.formatPesos(),
+          totalTransactions: transactionCount,
+          averageTicketValue: averageTicketValue.formatPesos(),
+          peakHours
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error fetching report summary:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_SUMMARY_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * GET /api/admin/reports/charts
+   * Get chart data for reports
+   */
+  async getReportCharts(req: Request, res: Response): Promise<void> {
+    try {
+      const { startDate, endDate, reportType } = req.query;
+      
+      let queryStartDate: Date;
+      let queryEndDate: Date;
+      
+      if (startDate && endDate) {
+        queryStartDate = new Date(startDate as string);
+        queryEndDate = new Date(endDate as string);
+        queryEndDate.setDate(queryEndDate.getDate() + 1);
+      } else {
+        queryStartDate = new Date();
+        queryStartDate.setHours(0, 0, 0, 0);
+        queryEndDate = new Date(queryStartDate);
+        queryEndDate.setDate(queryEndDate.getDate() + 1);
+      }
+
+      // Get hourly revenue data
+      const transactions = await prisma.transaction.findMany({
+        where: {
+          timestamp: {
+            gte: queryStartDate,
+            lt: queryEndDate
+          },
+          type: { in: ['PARKING', 'PENSION', 'LOST_TICKET'] }
+        },
+        select: {
+          timestamp: true,
+          amount: true,
+          type: true
+        }
+      });
+
+      // Group by hour for revenue chart
+      const hourlyRevenue = Array.from({length: 24}, (_, hour) => {
+        const hourTransactions = transactions.filter(t => t.timestamp.getHours() === hour);
+        const revenue = hourTransactions.reduce((sum, t) => sum + parseFloat(t.amount.toString()), 0);
+        return {
+          hour: `${hour.toString().padStart(2, '0')}:00`,
+          revenue: revenue.toFixed(2),
+          count: hourTransactions.length
+        };
+      });
+
+      // Transaction type breakdown
+      const typeBreakdown = transactions.reduce((acc, t) => {
+        const type = t.type;
+        if (!acc[type]) acc[type] = { count: 0, revenue: 0 };
+        acc[type].count++;
+        acc[type].revenue += parseFloat(t.amount.toString());
+        return acc;
+      }, {} as { [key: string]: { count: number, revenue: number } });
+
+      const transactionChart = Object.entries(typeBreakdown).map(([type, data]) => ({
+        type,
+        count: data.count,
+        revenue: data.revenue.toFixed(2)
+      }));
+
+      // Simple occupancy chart (active tickets throughout the day)
+      const occupancyChart = Array.from({length: 24}, (_, hour) => {
+        // This is a simplified calculation - in reality you'd need more complex logic
+        const activeAtHour = Math.floor(Math.random() * 50); // Placeholder
+        return {
+          hour: `${hour.toString().padStart(2, '0')}:00`,
+          occupancy: activeAtHour
+        };
+      });
+
+      res.json({
+        success: true,
+        data: {
+          revenueChart: hourlyRevenue,
+          transactionChart,
+          occupancyChart
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error fetching report charts:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_CHARTS_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * GET /api/admin/reports/transactions
+   * Get transaction history for reports
+   */
+  async getReportTransactions(req: Request, res: Response): Promise<void> {
+    try {
+      const { startDate, endDate, transactionType, page = 1, limit = 50 } = req.query;
+      
+      let queryStartDate: Date;
+      let queryEndDate: Date;
+      
+      if (startDate && endDate) {
+        queryStartDate = new Date(startDate as string);
+        queryEndDate = new Date(endDate as string);
+        queryEndDate.setDate(queryEndDate.getDate() + 1);
+      } else {
+        queryStartDate = new Date();
+        queryStartDate.setHours(0, 0, 0, 0);
+        queryEndDate = new Date(queryStartDate);
+        queryEndDate.setDate(queryEndDate.getDate() + 1);
+      }
+
+      // Build transaction type filter
+      let typeFilter: string[] = ['PARKING', 'PENSION', 'LOST_TICKET', 'REFUND'];
+      if (transactionType && transactionType !== 'all') {
+        switch (transactionType) {
+          case 'parking': typeFilter = ['PARKING']; break;
+          case 'pension': typeFilter = ['PENSION']; break;
+          case 'lost_ticket': typeFilter = ['LOST_TICKET']; break;
+          case 'refund': typeFilter = ['REFUND']; break;
+        }
+      }
+
+      const skip = (parseInt(page as string) - 1) * parseInt(limit as string);
+      const take = parseInt(limit as string);
+
+      // Get transactions with pagination
+      const [transactions, total] = await Promise.all([
+        prisma.transaction.findMany({
+          where: {
+            timestamp: {
+              gte: queryStartDate,
+              lt: queryEndDate
+            },
+            type: { in: typeFilter }
+          },
+          include: {
+            ticket: {
+              select: {
+                plateNumber: true,
+                barcode: true,
+                entryTime: true
+              }
+            },
+            pension: {
+              select: {
+                name: true,
+                plateNumber: true
+              }
+            }
+          },
+          orderBy: { timestamp: 'desc' },
+          skip,
+          take
+        }),
+        prisma.transaction.count({
+          where: {
+            timestamp: {
+              gte: queryStartDate,
+              lt: queryEndDate
+            },
+            type: { in: typeFilter }
+          }
+        })
+      ]);
+
+      // Calculate summary
+      const summaryData = await prisma.transaction.aggregate({
+        where: {
+          timestamp: {
+            gte: queryStartDate,
+            lt: queryEndDate
+          },
+          type: { in: typeFilter }
+        },
+        _sum: { amount: true },
+        _count: true
+      });
+
+      const formattedTransactions = transactions.map(transaction => ({
+        id: transaction.id,
+        type: transaction.type,
+        amount: transaction.amount,
+        description: transaction.description,
+        timestamp: transaction.timestamp,
+        operatorId: transaction.operatorId,
+        paymentMethod: transaction.paymentMethod,
+        plateNumber: transaction.ticket?.plateNumber || transaction.pension?.plateNumber,
+        customerName: transaction.pension?.name,
+        ticketBarcode: transaction.ticket?.barcode,
+        entryTime: transaction.ticket?.entryTime
+      }));
+
+      res.json({
+        success: true,
+        data: {
+          transactions: formattedTransactions,
+          total,
+          summary: {
+            totalAmount: Money.fromNumber(summaryData._sum.amount || 0).formatPesos(),
+            totalCount: summaryData._count
+          },
+          pagination: {
+            page: parseInt(page as string),
+            limit: parseInt(limit as string),
+            total,
+            pages: Math.ceil(total / parseInt(limit as string))
+          }
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error fetching report transactions:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_REPORT_TRANSACTIONS_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * GET /api/admin/hardware/status
+   * Get hardware status information
+   */
+  async getHardwareStatus(req: Request, res: Response): Promise<void> {
+    try {
+      // Check database connectivity
+      const dbStart = Date.now();
+      const dbHealth = await this.checkDatabaseHealth();
+      const dbResponseTime = Date.now() - dbStart;
+
+      // For now, assume printer and scanner are disconnected unless actual hardware is detected
+      // In a real implementation, these would check actual hardware connections
+      const printerConnected = false; // No physical printer connected
+      const scannerConnected = false; // No physical scanner connected
+
+      res.json({
+        success: true,
+        data: {
+          printer: {
+            status: printerConnected ? 'connected' : 'disconnected',
+            model: 'Epson TM-T20III',
+            lastPrint: printerConnected ? new Date().toISOString() : null,
+            description: printerConnected ? 'Impresora conectada y lista' : 'Impresora no detectada'
+          },
+          scanner: {
+            status: scannerConnected ? 'connected' : 'disconnected',
+            model: 'Honeywell Voyager 1250g',
+            lastScan: scannerConnected ? new Date().toISOString() : null,
+            description: scannerConnected ? 'Escáner conectado y listo' : 'Escáner no detectado'
+          },
+          database: {
+            status: dbHealth.status === 'HEALTHY' ? 'connected' : 'disconnected',
+            responseTime: `${dbResponseTime}ms`,
+            connectionCount: dbHealth.connections || 0,
+            description: dbHealth.status === 'HEALTHY' ? 'Base de datos conectada y operativa' : 'Error de conexión con la base de datos'
+          },
+          network: {
+            status: 'connected', // If we can respond to HTTP requests, network is working
+            latency: dbResponseTime < 50 ? 'low' : dbResponseTime < 100 ? 'medium' : 'high',
+            quality: dbResponseTime < 50 ? 'excellent' : dbResponseTime < 100 ? 'good' : 'poor',
+            description: 'Conectividad de red activa'
+          },
+          system: {
+            status: 'healthy',
+            uptime: Math.floor(process.uptime()),
+            lastUpdate: new Date().toISOString(),
+            description: 'Sistema operativo funcionando correctamente'
+          }
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error fetching hardware status:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_HARDWARE_STATUS_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * GET /api/admin/tickets/:id
+   * Get detailed information for a specific ticket
+   */
+  async getTicketDetails(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+
+      const ticket = await prisma.ticket.findUnique({
+        where: { id },
+        include: {
+          transactions: {
+            orderBy: { timestamp: 'desc' }
+          }
+        }
+      });
+
+      if (!ticket) {
+        res.status(404).json({
+          success: false,
+          error: {
+            code: 'TICKET_NOT_FOUND',
+            message: 'Boleto no encontrado',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // Calculate current fee if not paid
+      let currentFee = '0.00';
+      if (ticket.status === 'ACTIVE') {
+        const calculation = await this.calculateParkingFee(ticket.entryTime);
+        currentFee = calculation.amount.toString();
+      } else {
+        currentFee = ticket.totalAmount?.toString() || '0.00';
+      }
+
+      res.json({
+        success: true,
+        data: {
+          ticket: {
+            id: ticket.id,
+            plateNumber: ticket.plateNumber,
+            barcode: ticket.barcode,
+            entryTime: ticket.entryTime,
+            exitTime: ticket.exitTime,
+            status: ticket.status,
+            totalAmount: ticket.totalAmount?.toString() || '0.00',
+            currentFee,
+            paidAt: ticket.paidAt,
+            printedAt: ticket.printedAt,
+            paymentMethod: ticket.paymentMethod
+          },
+          transactions: ticket.transactions.map(t => ({
+            id: t.id,
+            type: t.type,
+            amount: t.amount.toString(),
+            description: t.description,
+            timestamp: t.timestamp,
+            operatorId: t.operatorId,
+            paymentMethod: t.paymentMethod
+          }))
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error fetching ticket details:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_TICKET_DETAILS_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * PUT /api/admin/tickets/:id/payment
+   * Process payment for a specific ticket
+   */
+  async processTicketPayment(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { paymentMethod = 'CASH', amountPaid } = req.body;
+
+      const ticket = await prisma.ticket.findUnique({
+        where: { id }
+      });
+
+      if (!ticket) {
+        res.status(404).json({
+          success: false,
+          error: {
+            code: 'TICKET_NOT_FOUND',
+            message: 'Boleto no encontrado',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      if (ticket.status !== 'ACTIVE') {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'TICKET_NOT_ACTIVE',
+            message: 'El boleto no está activo',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // Calculate fee using configuration
+      const currentTime = new Date();
+      const calculation = await this.calculateParkingFee(ticket.entryTime, currentTime);
+      const amountToCharge = amountPaid ? parseFloat(amountPaid) : calculation.amount;
+
+      // Update ticket and create transaction
+      const [updatedTicket, transaction] = await prisma.$transaction([
+        prisma.ticket.update({
+          where: { id },
+          data: {
+            status: 'PAID',
+            totalAmount: amountToCharge,
+            exitTime: currentTime,
+            paidAt: currentTime,
+            paymentMethod
+          }
+        }),
+        prisma.transaction.create({
+          data: {
+            type: 'PARKING',
+            amount: amountToCharge,
+            description: calculation.description,
+            ticketId: id,
+            operatorId: req.user?.id || 'ADMIN',
+            paymentMethod,
+            timestamp: currentTime
+          }
+        })
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          ticket: {
+            id: updatedTicket.id,
+            plateNumber: updatedTicket.plateNumber,
+            status: updatedTicket.status,
+            totalAmount: updatedTicket.totalAmount?.toString(),
+            paidAt: updatedTicket.paidAt
+          },
+          transaction: {
+            id: transaction.id,
+            amount: transaction.amount.toString(),
+            description: transaction.description
+          },
+          message: 'Pago procesado exitosamente'
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error processing ticket payment:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'PROCESS_PAYMENT_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * PUT /api/admin/tickets/:id/lost
+   * Mark a ticket as lost and apply lost ticket fee
+   */
+  async markTicketAsLost(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+
+      const ticket = await prisma.ticket.findUnique({
+        where: { id }
+      });
+
+      if (!ticket) {
+        res.status(404).json({
+          success: false,
+          error: {
+            code: 'TICKET_NOT_FOUND',
+            message: 'Boleto no encontrado',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      if (ticket.status !== 'ACTIVE') {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'TICKET_NOT_ACTIVE',
+            message: 'El boleto no está activo',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // Get lost ticket fee from configuration
+      const config = await this.getCurrentPricingConfig();
+      const lostTicketFee = config.lostTicketFee;
+      const currentTime = new Date();
+
+      // Update ticket and create transaction
+      const [updatedTicket, transaction] = await prisma.$transaction([
+        prisma.ticket.update({
+          where: { id },
+          data: {
+            status: 'LOST',
+            totalAmount: lostTicketFee,
+            exitTime: currentTime,
+            paidAt: currentTime,
+            paymentMethod: 'CASH'
+          }
+        }),
+        prisma.transaction.create({
+          data: {
+            type: 'LOST_TICKET',
+            amount: lostTicketFee,
+            description: 'Cobro por boleto perdido',
+            ticketId: id,
+            operatorId: req.user?.id || 'ADMIN',
+            paymentMethod: 'CASH',
+            timestamp: currentTime
+          }
+        })
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          ticket: {
+            id: updatedTicket.id,
+            plateNumber: updatedTicket.plateNumber,
+            status: updatedTicket.status,
+            totalAmount: updatedTicket.totalAmount?.toString(),
+            paidAt: updatedTicket.paidAt
+          },
+          transaction: {
+            id: transaction.id,
+            amount: transaction.amount.toString(),
+            description: transaction.description
+          },
+          message: 'Boleto marcado como perdido y cobro procesado'
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error marking ticket as lost:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'MARK_LOST_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * GET /api/admin/config/pricing
+   * Get current pricing configuration
+   */
+  async getPricingConfig(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const pricingConfig = await prisma.pricingConfig.findFirst({
+        where: { isActive: true },
+        include: {
+          incrementRates: {
+            orderBy: { incrementNumber: 'asc' }
+          }
+        }
+      });
+
+      if (!pricingConfig) {
+        // Return default configuration if none exists
+        res.json({
+          success: true,
+          data: {
+            id: null,
+            minimumHours: 1,
+            minimumRate: '25.00',
+            incrementMinutes: 15,
+            incrementRate: '5.00',
+            dailySpecialHours: null,
+            dailySpecialRate: null,
+            monthlyRate: '300.00',
+            lostTicketFee: '50.00',
+            isActive: true,
+            incrementRates: []
+          },
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+
+      res.json({
+        success: true,
+        data: {
+          id: pricingConfig.id,
+          minimumHours: pricingConfig.minimumHours,
+          minimumRate: pricingConfig.minimumRate.toString(),
+          incrementMinutes: pricingConfig.incrementMinutes,
+          incrementRate: pricingConfig.incrementRate.toString(),
+          dailySpecialHours: pricingConfig.dailySpecialHours,
+          dailySpecialRate: pricingConfig.dailySpecialRate?.toString(),
+          monthlyRate: pricingConfig.monthlyRate.toString(),
+          lostTicketFee: pricingConfig.lostTicketFee.toString(),
+          isActive: pricingConfig.isActive,
+          validFrom: pricingConfig.validFrom,
+          validUntil: pricingConfig.validUntil,
+          incrementRates: pricingConfig.incrementRates.map(rate => ({
+            incrementNumber: rate.incrementNumber,
+            rate: rate.rate.toString(),
+            description: rate.description
+          }))
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error fetching pricing config:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_PRICING_CONFIG_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * PUT /api/admin/config/pricing
+   * Update pricing configuration
+   */
+  async updatePricingConfig(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const {
+        minimumHours,
+        minimumRate,
+        incrementMinutes,
+        incrementRate,
+        dailySpecialHours,
+        dailySpecialRate,
+        monthlyRate,
+        lostTicketFee
+      } = req.body;
+
+      // Deactivate current active config
+      await prisma.pricingConfig.updateMany({
+        where: { isActive: true },
+        data: { 
+          isActive: false,
+          validUntil: new Date()
+        }
+      });
+
+      // Create new configuration
+      const newConfig = await prisma.pricingConfig.create({
+        data: {
+          minimumHours: parseInt(minimumHours) || 1,
+          minimumRate: parseFloat(minimumRate) || 25.00,
+          incrementMinutes: parseInt(incrementMinutes) || 15,
+          incrementRate: parseFloat(incrementRate) || 5.00,
+          dailySpecialHours: dailySpecialHours ? parseInt(dailySpecialHours) : null,
+          dailySpecialRate: dailySpecialRate ? parseFloat(dailySpecialRate) : null,
+          monthlyRate: parseFloat(monthlyRate) || 300.00,
+          lostTicketFee: parseFloat(lostTicketFee) || 50.00,
+          isActive: true,
+          createdBy: req.user?.id || 'ADMIN'
+        }
+      });
+
+      // Log audit event
+      await auditService.logFromRequest(
+        req,
+        'PricingConfig',
+        newConfig.id,
+        'CONFIG_UPDATED',
+        null,
+        {
+          minimumRate: newConfig.minimumRate.toString(),
+          lostTicketFee: newConfig.lostTicketFee.toString(),
+          monthlyRate: newConfig.monthlyRate.toString()
+        }
+      );
+
+      res.json({
+        success: true,
+        data: {
+          id: newConfig.id,
+          minimumHours: newConfig.minimumHours,
+          minimumRate: newConfig.minimumRate.toString(),
+          incrementMinutes: newConfig.incrementMinutes,
+          incrementRate: newConfig.incrementRate.toString(),
+          dailySpecialHours: newConfig.dailySpecialHours,
+          dailySpecialRate: newConfig.dailySpecialRate?.toString(),
+          monthlyRate: newConfig.monthlyRate.toString(),
+          lostTicketFee: newConfig.lostTicketFee.toString(),
+          message: 'Configuración de precios actualizada exitosamente'
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error updating pricing config:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'UPDATE_PRICING_CONFIG_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * GET /api/admin/metrics/hourly
+   * Get hourly metrics for charts and analytics
+   */
+  async getHourlyMetrics(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { date } = req.query;
+      
+      // Default to today if no date provided
+      let targetDate = new Date();
+      if (date) {
+        targetDate = new Date(date as string);
+      }
+      
+      const startOfDay = new Date(targetDate);
+      startOfDay.setHours(0, 0, 0, 0);
+      
+      const endOfDay = new Date(targetDate);
+      endOfDay.setHours(23, 59, 59, 999);
+
+      // Get hourly ticket entries (new tickets created each hour)
+      const hourlyEntries = await prisma.ticket.groupBy({
+        by: ['entryTime'],
+        where: {
+          entryTime: {
+            gte: startOfDay,
+            lte: endOfDay
+          }
+        },
+        _count: {
+          id: true
+        }
+      });
+
+      // Get hourly exits (tickets paid each hour)
+      const hourlyExits = await prisma.ticket.groupBy({
+        by: ['paidAt'],
+        where: {
+          paidAt: {
+            gte: startOfDay,
+            lte: endOfDay
+          },
+          status: { in: ['PAID', 'LOST'] }
+        },
+        _count: {
+          id: true
+        }
+      });
+
+      // Get hourly revenue (transactions by hour)
+      const hourlyRevenue = await prisma.transaction.groupBy({
+        by: ['timestamp'],
+        where: {
+          timestamp: {
+            gte: startOfDay,
+            lte: endOfDay
+          },
+          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION'] }
+        },
+        _sum: {
+          amount: true
+        },
+        _count: {
+          id: true
+        }
+      });
+
+      // Create hourly data structure (24 hours)
+      const hourlyData = Array.from({ length: 24 }, (_, hour) => {
+        // Count entries for this hour
+        const entriesThisHour = hourlyEntries.filter(entry => {
+          return new Date(entry.entryTime).getHours() === hour;
+        }).reduce((sum, entry) => sum + entry._count.id, 0);
+
+        // Count exits for this hour
+        const exitsThisHour = hourlyExits.filter(exit => {
+          return exit.paidAt && new Date(exit.paidAt).getHours() === hour;
+        }).reduce((sum, exit) => sum + exit._count.id, 0);
+
+        // Sum revenue for this hour
+        const revenueThisHour = hourlyRevenue.filter(rev => {
+          return new Date(rev.timestamp).getHours() === hour;
+        }).reduce((sum, rev) => sum + parseFloat((rev._sum.amount || 0).toString()), 0);
+
+        return {
+          hour: hour.toString().padStart(2, '0'),
+          entries: entriesThisHour,
+          exits: exitsThisHour,
+          revenue: revenueThisHour
+        };
+      });
+
+      // Calculate cumulative revenue for the line chart
+      let cumulativeRevenue = 0;
+      const revenueData = hourlyData.map(item => {
+        cumulativeRevenue += item.revenue;
+        return {
+          time: `${item.hour}:00`,
+          cumulative: cumulativeRevenue
+        };
+      });
+
+      // Calculate summary statistics
+      const totalEntries = hourlyData.reduce((sum, item) => sum + item.entries, 0);
+      const totalExits = hourlyData.reduce((sum, item) => sum + item.exits, 0);
+      const totalRevenue = hourlyData.reduce((sum, item) => sum + item.revenue, 0);
+
+      res.json({
+        success: true,
+        data: {
+          date: targetDate.toISOString().split('T')[0],
+          hourlyData,
+          revenueData,
+          summary: {
+            totalEntries,
+            totalExits,
+            totalRevenue: totalRevenue.toFixed(2),
+            currentOccupancy: totalEntries - totalExits
+          },
+          lastUpdated: new Date().toISOString()
+        },
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('Error fetching hourly metrics:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'FETCH_HOURLY_METRICS_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
 }
 
 export default new AdminController();

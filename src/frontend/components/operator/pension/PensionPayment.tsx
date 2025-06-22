@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DollarSign, ArrowLeft, Printer, Calculator, AlertCircle, CheckCircle, Calendar } from 'lucide-react';
-import Decimal from 'decimal.js';
+import { Money } from '../../../../shared/utils/money';
 
 interface PensionPaymentProps {
   customer: any;
@@ -13,34 +13,42 @@ export default function PensionPayment({ customer, onPaymentComplete, onBack }: 
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [change, setChange] = useState<Decimal | null>(null);
+  const [change, setChange] = useState<Money | null>(null);
   const [isRenewal, setIsRenewal] = useState(false);
   const [renewalMonths, setRenewalMonths] = useState(1);
 
-  const monthlyRate = new Decimal(customer.monthlyRate);
-  const totalAmount = isRenewal ? monthlyRate.times(renewalMonths) : monthlyRate;
+  const monthlyRate = Money.fromNumber(customer.monthlyRate);
+  const totalAmount = isRenewal ? monthlyRate.multiply(renewalMonths) : monthlyRate;
 
   useEffect(() => {
     if (paymentAmount) {
-      const payment = new Decimal(paymentAmount || 0);
-      
-      if (payment.gte(totalAmount)) {
-        setChange(payment.minus(totalAmount));
-      } else {
+      try {
+        const payment = Money.fromNumber(parseFloat(paymentAmount) || 0);
+        
+        if (payment.greaterThanOrEqual(totalAmount)) {
+          setChange(payment.subtract(totalAmount));
+        } else {
+          setChange(null);
+        }
+      } catch (error) {
         setChange(null);
       }
     }
   }, [paymentAmount, totalAmount]);
 
-  const formatCurrency = (amount: Decimal | number) => {
-    const value = amount instanceof Decimal ? amount : new Decimal(amount);
-    return `$${value.toFixed(2)} MXN`;
+  const formatCurrency = (amount: Money | number) => {
+    const value = amount instanceof Money ? amount : Money.fromNumber(amount);
+    return value.formatPesos();
   };
 
   const addAmount = (amount: string) => {
-    const current = new Decimal(paymentAmount || 0);
-    const add = new Decimal(amount);
-    setPaymentAmount(current.plus(add).toString());
+    try {
+      const current = Money.fromNumber(parseFloat(paymentAmount) || 0);
+      const add = Money.fromNumber(parseFloat(amount));
+      setPaymentAmount(current.add(add).toString());
+    } catch (error) {
+      setPaymentAmount(amount);
+    }
   };
 
   const clearAmount = () => {
@@ -51,9 +59,15 @@ export default function PensionPayment({ customer, onPaymentComplete, onBack }: 
   const handlePayment = async () => {
     if (!paymentAmount) return;
 
-    const payment = new Decimal(paymentAmount);
-    if (payment.lt(totalAmount)) {
-      setError('El monto pagado es insuficiente');
+    let payment: Money;
+    try {
+      payment = Money.fromNumber(parseFloat(paymentAmount));
+      if (payment.lessThan(totalAmount)) {
+        setError('El monto pagado es insuficiente');
+        return;
+      }
+    } catch (error) {
+      setError('Monto de pago inválido');
       return;
     }
 
@@ -268,7 +282,7 @@ export default function PensionPayment({ customer, onPaymentComplete, onBack }: 
               </button>
             </div>
 
-            {change && change.gt(0) && (
+            {change && change.greaterThan(Money.zero()) && (
               <div className="bg-blue-50 p-4 rounded-lg">
                 <div className="flex justify-between items-center">
                   <span className="text-blue-800 font-medium">Cambio:</span>
@@ -295,7 +309,7 @@ export default function PensionPayment({ customer, onPaymentComplete, onBack }: 
 
             <button
               onClick={handlePayment}
-              disabled={!paymentAmount || isProcessing || new Decimal(paymentAmount || 0).lt(totalAmount)}
+              disabled={!paymentAmount || isProcessing || (parseFloat(paymentAmount || '0') < totalAmount.toNumber())}
               className="btn-primary w-full btn-operator flex items-center justify-center gap-2"
             >
               {isProcessing ? (

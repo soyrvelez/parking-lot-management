@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAuthenticatedFetch } from '@/hooks/useKeyboardShortcuts';
 import { Car, DollarSign, Clock, TrendingUp, Users, AlertTriangle } from 'lucide-react';
 import Decimal from 'decimal.js';
 
@@ -21,22 +22,31 @@ export default function DashboardStats() {
     pendingIssues: 0,
   });
   const [isLoading, setIsLoading] = useState(true);
+  const authenticatedFetch = useAuthenticatedFetch();
 
   useEffect(() => {
     fetchStats();
     const interval = setInterval(fetchStats, 15000); // Update every 15 seconds
     return () => clearInterval(interval);
-  }, []);
+  }, [authenticatedFetch]);
 
   const fetchStats = async () => {
     try {
-      const response = await fetch('/api/admin/dashboard/stats', {
-        credentials: 'include',
-      });
+      const response = await authenticatedFetch('/api/admin/dashboard');
 
       if (response.ok) {
-        const data = await response.json();
-        setStats(data);
+        const result = await response.json();
+        if (result.success && result.data?.metrics) {
+          const metrics = result.data.metrics;
+          setStats({
+            activeTickets: metrics.activeVehicles || 0,
+            todayRevenue: metrics.todayRevenue?.replace(/[\$,\s]|pesos/g, '') || '0.00',
+            averageStay: metrics.averageDuration || '0h 0m',
+            totalSpaces: 100, // Default value, could be configured
+            occupancyRate: Math.round((metrics.activeVehicles / 100) * 100) || 0,
+            pendingIssues: 0, // Not provided by current API
+          });
+        }
       }
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
@@ -46,8 +56,15 @@ export default function DashboardStats() {
   };
 
   const formatCurrency = (amount: string) => {
-    const value = new Decimal(amount);
-    return `$${value.toFixed(2)}`;
+    try {
+      // Remove any non-numeric characters except decimal points and minus signs
+      const cleanAmount = amount.replace(/[^0-9.-]/g, '');
+      const value = new Decimal(cleanAmount || '0');
+      return `$${value.toFixed(2)}`;
+    } catch (error) {
+      console.warn('Error formatting currency:', amount, error);
+      return '$0.00';
+    }
   };
 
   const getOccupancyColor = (rate: number) => {
