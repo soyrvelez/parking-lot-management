@@ -44,7 +44,35 @@ export class AdminController {
 
   constructor() {
     this.scannerService = new BarcodeScannerService();
-    this.printerService = new ThermalPrinterService();
+    this.printerService = new ThermalPrinterService({
+      interfaceType: process.env.PRINTER_INTERFACE_TYPE as 'usb' | 'tcp' || 'usb',
+      devicePath: process.env.PRINTER_DEVICE_PATH || '/dev/usb/lp0',
+      host: process.env.PRINTER_HOST || '192.168.1.100',
+      port: parseInt(process.env.PRINTER_PORT || '9100'),
+      timeout: parseInt(process.env.PRINTER_TIMEOUT || '5000'),
+      retryAttempts: parseInt(process.env.PRINTER_RETRY_ATTEMPTS || '3'),
+      paperWidth: parseInt(process.env.PRINTER_PAPER_WIDTH || '32')
+    });
+  }
+
+  /**
+   * Safely format large amounts that may exceed Money class limits
+   */
+  private formatLargeAmount(amount: number): string {
+    try {
+      if (amount <= 9999.99) {
+        return Money.fromNumber(amount).formatPesos();
+      }
+      return `$${amount.toLocaleString('es-MX', { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+      })} pesos`;
+    } catch (error) {
+      return `$${amount.toLocaleString('es-MX', { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+      })} pesos`;
+    }
   }
 
   /**
@@ -165,7 +193,10 @@ export class AdminController {
         _count: true
       });
 
-      const todayRevenue = Money.fromNumber(todayTransactions._sum.amount || 0);
+      // Handle large revenue amounts safely
+      const todayRevenueValue = todayTransactions._sum.amount 
+        ? (todayTransactions._sum.amount as any).toNumber() 
+        : 0;
       const totalTransactions = todayTransactions._count;
 
       // Calculate average parking duration for today
@@ -228,16 +259,16 @@ export class AdminController {
         orderBy: { shiftStart: 'desc' }
       });
 
-      const cashRegisterBalance = openRegister 
-        ? Money.fromNumber(openRegister.currentBalance.toNumber())
-        : Money.ZERO;
+      const cashRegisterBalanceValue = openRegister 
+        ? openRegister.currentBalance.toNumber()
+        : 0;
 
       res.json({
         success: true,
         data: {
           metrics: {
             activeVehicles,
-            todayRevenue: todayRevenue.formatPesos(),
+            todayRevenue: this.formatLargeAmount(todayRevenueValue),
             totalTransactions,
             averageDuration: i18n.formatDuration(averageDurationMinutes),
             peakHours: {
@@ -252,7 +283,7 @@ export class AdminController {
             },
             cashRegister: {
               status: openRegister ? 'ABIERTA' : 'CERRADA',
-              balance: cashRegisterBalance.formatPesos(),
+              balance: this.formatLargeAmount(cashRegisterBalanceValue),
               operator: openRegister?.operatorId || null
             },
             hardwareStatus: {
@@ -261,7 +292,7 @@ export class AdminController {
                 description: hardwareStatus.printer.connected 
                   ? i18n.t('hardware.printer_connected')
                   : i18n.t('hardware.printer_disconnected'),
-                lastActivity: hardwareStatus.printer.lastConnected || null
+                lastActivity: hardwareStatus.printer.lastUpdate || null
               },
               scanner: {
                 status: hardwareStatus.scanner.ready ? 'LISTO' : 'OCUPADO',
@@ -327,7 +358,9 @@ export class AdminController {
         _count: true
       });
 
-      const totalRevenue = Money.fromNumber(revenueData._sum.amount || 0);
+      const totalRevenueValue = revenueData._sum.amount 
+        ? (revenueData._sum.amount as any).toNumber() 
+        : 0;
 
       // Get revenue breakdown by type
       const revenueByType = await prisma.transaction.groupBy({
@@ -344,8 +377,11 @@ export class AdminController {
       });
 
       const revenueBreakdown = revenueByType.reduce((acc, item) => {
+        const itemAmount = item._sum.amount 
+          ? (item._sum.amount as any).toNumber() 
+          : 0;
         acc[item.type] = {
-          amount: Money.fromNumber(item._sum.amount || 0).formatPesos(),
+          amount: this.formatLargeAmount(itemAmount),
           count: item._count
         };
         return acc;
@@ -404,10 +440,10 @@ export class AdminController {
           end: i18n.formatDate(new Date(reportEndDate.getTime() - 24 * 60 * 60 * 1000))
         } : undefined,
         revenue: {
-          total: totalRevenue.formatPesos(),
-          cash: revenueBreakdown.PARKING?.amount || Money.ZERO.formatPesos(),
-          lostTickets: revenueBreakdown.LOST_TICKET?.amount || Money.ZERO.formatPesos(),
-          pension: revenueBreakdown.PENSION?.amount || Money.ZERO.formatPesos(),
+          total: this.formatLargeAmount(totalRevenueValue),
+          cash: revenueBreakdown.PARKING?.amount || this.formatLargeAmount(0),
+          lostTickets: revenueBreakdown.LOST_TICKET?.amount || this.formatLargeAmount(0),
+          pension: revenueBreakdown.PENSION?.amount || this.formatLargeAmount(0),
           breakdown: revenueBreakdown
         },
         transactions: {
@@ -740,7 +776,7 @@ export class AdminController {
                 description: printerStatus.connected 
                   ? i18n.t('hardware.printer_connected')
                   : i18n.t('hardware.printer_disconnected'),
-                lastActivity: printerStatus.lastConnected,
+                lastActivity: printerStatus.lastUpdate,
                 queueSize: 0 // printerStatus.queueSize || 0
               },
               scanner: {
@@ -1072,7 +1108,11 @@ export class AdminController {
     }
 
     return {
-      totalRevenue: Money.fromNumber(revenue._sum.amount || 0),
+      totalRevenue: Money.fromNumber(
+        revenue._sum.amount 
+          ? (revenue._sum.amount as any).toNumber() 
+          : 0
+      ),
       totalTransactions: transactions,
       totalVehicles: vehicles,
       averageDuration
@@ -1292,17 +1332,19 @@ export class AdminController {
             gte: queryStartDate,
             lt: queryEndDate
           },
-          type: { in: typeFilter }
+          type: { in: typeFilter as any }
         },
         _sum: { amount: true },
         _count: true
       });
 
-      const totalRevenue = Money.fromNumber(revenueSummary._sum.amount || 0);
-      const transactionCount = revenueSummary._count;
+      const totalRevenueValue = revenueSummary._sum.amount 
+        ? (revenueSummary._sum.amount as any).toNumber() 
+        : 0;
+      const transactionCount = revenueSummary._count || 0;
       const averageTicketValue = transactionCount > 0 
-        ? totalRevenue.dividedBy(transactionCount)
-        : Money.fromNumber(0);
+        ? totalRevenueValue / transactionCount
+        : 0;
 
       // Get hourly activity for peak hours
       const transactions = await prisma.transaction.findMany({
@@ -1311,7 +1353,7 @@ export class AdminController {
             gte: queryStartDate,
             lt: queryEndDate
           },
-          type: { in: typeFilter }
+          type: { in: typeFilter as any }
         },
         select: { timestamp: true }
       });
@@ -1333,9 +1375,9 @@ export class AdminController {
       res.json({
         success: true,
         data: {
-          totalRevenue: totalRevenue.formatPesos(),
+          totalRevenue: this.formatLargeAmount(totalRevenueValue),
           totalTransactions: transactionCount,
-          averageTicketValue: averageTicketValue.formatPesos(),
+          averageTicketValue: this.formatLargeAmount(averageTicketValue),
           peakHours
         },
         timestamp: new Date().toISOString()
@@ -1493,7 +1535,7 @@ export class AdminController {
               gte: queryStartDate,
               lt: queryEndDate
             },
-            type: { in: typeFilter }
+            type: { in: typeFilter as any }
           },
           include: {
             ticket: {
@@ -1520,7 +1562,7 @@ export class AdminController {
               gte: queryStartDate,
               lt: queryEndDate
             },
-            type: { in: typeFilter }
+            type: { in: typeFilter as any }
           }
         })
       ]);
@@ -1532,25 +1574,33 @@ export class AdminController {
             gte: queryStartDate,
             lt: queryEndDate
           },
-          type: { in: typeFilter }
+          type: { in: typeFilter as any }
         },
         _sum: { amount: true },
         _count: true
       });
 
-      const formattedTransactions = transactions.map(transaction => ({
-        id: transaction.id,
-        type: transaction.type,
-        amount: transaction.amount,
-        description: transaction.description,
-        timestamp: transaction.timestamp,
-        operatorId: transaction.operatorId,
-        paymentMethod: transaction.paymentMethod,
-        plateNumber: transaction.ticket?.plateNumber || transaction.pension?.plateNumber,
-        customerName: transaction.pension?.name,
-        ticketBarcode: transaction.ticket?.barcode,
-        entryTime: transaction.ticket?.entryTime
-      }));
+      const formattedTransactions = transactions.map(transaction => {
+        // Type assertion for included relations
+        const transactionWithRelations = transaction as typeof transaction & {
+          ticket?: { plateNumber: string; barcode: string; entryTime: Date } | null;
+          pension?: { name: string; plateNumber: string } | null;
+        };
+        
+        return {
+          id: transactionWithRelations.id,
+          type: transactionWithRelations.type,
+          amount: transactionWithRelations.amount,
+          description: transactionWithRelations.description,
+          timestamp: transactionWithRelations.timestamp,
+          operatorId: transactionWithRelations.operatorId,
+          paymentMethod: transactionWithRelations.paymentMethod,
+          plateNumber: transactionWithRelations.ticket?.plateNumber || transactionWithRelations.pension?.plateNumber,
+          customerName: transactionWithRelations.pension?.name,
+          ticketBarcode: transactionWithRelations.ticket?.barcode,
+          entryTime: transactionWithRelations.ticket?.entryTime
+        };
+      });
 
       res.json({
         success: true,
@@ -1558,8 +1608,12 @@ export class AdminController {
           transactions: formattedTransactions,
           total,
           summary: {
-            totalAmount: Money.fromNumber(summaryData._sum.amount || 0).formatPesos(),
-            totalCount: summaryData._count
+            totalAmount: this.formatLargeAmount(
+              summaryData._sum.amount 
+                ? (summaryData._sum.amount as any).toNumber() 
+                : 0
+            ),
+            totalCount: summaryData._count || 0
           },
           pagination: {
             page: parseInt(page as string),
@@ -2014,30 +2068,69 @@ export class AdminController {
         lostTicketFee
       } = req.body;
 
-      // Deactivate current active config
-      await prisma.pricingConfig.updateMany({
-        where: { isActive: true },
-        data: { 
-          isActive: false,
-          validUntil: new Date()
-        }
+      // DEFENSIVE: Sanitize and validate all inputs
+      const sanitizedData = {
+        minimumHours: Number(minimumHours),
+        minimumRate: parseFloat(minimumRate),
+        incrementMinutes: Number(incrementMinutes),
+        incrementRate: parseFloat(incrementRate),
+        dailySpecialHours: Number(dailySpecialHours),
+        dailySpecialRate: parseFloat(dailySpecialRate),
+        monthlyRate: parseFloat(monthlyRate),
+        lostTicketFee: parseFloat(lostTicketFee)
+      };
+
+      // DEFENSIVE: Validate all numbers are finite and valid
+      const isValidNumber = (num: number): boolean => Number.isFinite(num) && !Number.isNaN(num);
+      
+      if (!isValidNumber(sanitizedData.minimumHours) ||
+          !isValidNumber(sanitizedData.minimumRate) ||
+          !isValidNumber(sanitizedData.incrementMinutes) ||
+          !isValidNumber(sanitizedData.incrementRate) ||
+          !isValidNumber(sanitizedData.dailySpecialHours) ||
+          !isValidNumber(sanitizedData.dailySpecialRate) ||
+          !isValidNumber(sanitizedData.monthlyRate) ||
+          !isValidNumber(sanitizedData.lostTicketFee)) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_NUMERIC_VALUES',
+            message: 'Todos los valores de precio deben ser números válidos',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // DEFENSIVE: Database transaction with rollback capability
+      const result = await prisma.$transaction(async (tx) => {
+        // Deactivate current active config
+        await tx.pricingConfig.updateMany({
+          where: { isActive: true },
+          data: { 
+            isActive: false,
+            validUntil: new Date()
+          }
+        });
+
+        // Create new configuration with validated data
+        return await tx.pricingConfig.create({
+          data: {
+            minimumHours: sanitizedData.minimumHours,
+            minimumRate: sanitizedData.minimumRate,
+            incrementMinutes: sanitizedData.incrementMinutes,
+            incrementRate: sanitizedData.incrementRate,
+            dailySpecialHours: sanitizedData.dailySpecialHours,
+            dailySpecialRate: sanitizedData.dailySpecialRate,
+            monthlyRate: sanitizedData.monthlyRate,
+            lostTicketFee: sanitizedData.lostTicketFee,
+            isActive: true,
+            createdBy: req.user?.id || 'ADMIN'
+          }
+        });
       });
 
-      // Create new configuration
-      const newConfig = await prisma.pricingConfig.create({
-        data: {
-          minimumHours: parseInt(minimumHours) || 1,
-          minimumRate: parseFloat(minimumRate) || 25.00,
-          incrementMinutes: parseInt(incrementMinutes) || 15,
-          incrementRate: parseFloat(incrementRate) || 5.00,
-          dailySpecialHours: dailySpecialHours ? parseInt(dailySpecialHours) : null,
-          dailySpecialRate: dailySpecialRate ? parseFloat(dailySpecialRate) : null,
-          monthlyRate: parseFloat(monthlyRate) || 300.00,
-          lostTicketFee: parseFloat(lostTicketFee) || 50.00,
-          isActive: true,
-          createdBy: req.user?.id || 'ADMIN'
-        }
-      });
+      const newConfig = result;
 
       // Log audit event
       await auditService.logFromRequest(
@@ -2069,14 +2162,37 @@ export class AdminController {
         },
         timestamp: new Date().toISOString()
       });
-    } catch (error) {
-      console.error('Error updating pricing config:', error);
+    } catch (error: any) {
+      console.error('ADMIN PANEL CRASH - Error updating pricing config:', error);
+      
+      // DEFENSIVE: Handle specific database errors
+      let errorMessage = 'Error interno del sistema';
+      let errorCode = 'UPDATE_PRICING_CONFIG_ERROR';
+
+      if (error.code === 'P2002') {
+        errorMessage = 'Error de restricción de base de datos: configuración duplicada';
+        errorCode = 'DUPLICATE_CONFIG_ERROR';
+      } else if (error.code === 'P2025') {
+        errorMessage = 'Error de base de datos: registro no encontrado';
+        errorCode = 'RECORD_NOT_FOUND_ERROR';
+      } else if (error.code === 'P2003') {
+        errorMessage = 'Error de referencia de base de datos';
+        errorCode = 'FOREIGN_KEY_ERROR';
+      } else if (error.message?.includes('out of range')) {
+        errorMessage = 'Valores numéricos fuera del rango permitido';
+        errorCode = 'NUMERIC_RANGE_ERROR';
+      } else if (error.message?.includes('invalid input syntax')) {
+        errorMessage = 'Formato de datos inválido';
+        errorCode = 'INVALID_DATA_FORMAT_ERROR';
+      }
+
       res.status(500).json({
         success: false,
         error: {
-          code: 'UPDATE_PRICING_CONFIG_ERROR',
-          message: i18n.t('system.internal_error'),
-          timestamp: new Date().toISOString()
+          code: errorCode,
+          message: errorMessage,
+          timestamp: new Date().toISOString(),
+          details: process.env.NODE_ENV === 'development' ? error.message : undefined
         }
       });
     }
@@ -2211,6 +2327,85 @@ export class AdminController {
         success: false,
         error: {
           code: 'FETCH_HOURLY_METRICS_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * Export reports in various formats
+   * Currently supports CSV for summary reports, PDF planned for future
+   */
+  async exportReport(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { 
+        startDate, 
+        endDate, 
+        reportType, 
+        transactionType, 
+        exportType, 
+        reportScope 
+      } = req.query as {
+        startDate: string;
+        endDate: string;
+        reportType: string;
+        transactionType: string;
+        exportType: 'csv' | 'pdf';
+        reportScope: 'summary' | 'detailed' | 'transactions';
+      };
+
+      // Validate required parameters
+      if (!startDate || !endDate || !exportType || !reportScope) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'MISSING_PARAMETERS',
+            message: 'Faltan parámetros requeridos: startDate, endDate, exportType, reportScope',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // For now, only CSV export is supported
+      if (exportType === 'pdf') {
+        res.status(501).json({
+          success: false,
+          error: {
+            code: 'PDF_NOT_IMPLEMENTED',
+            message: 'La exportación a PDF aún no está implementada. Use CSV por el momento.',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // For CSV exports, redirect to existing daily report functionality
+      if (exportType === 'csv' && reportScope === 'summary') {
+        // Redirect to daily report with CSV format
+        req.query.format = 'csv';
+        req.query.date = startDate; // Use startDate as the report date
+        return this.getDailyReport(req, res);
+      }
+
+      // For other report scopes, return not implemented
+      res.status(501).json({
+        success: false,
+        error: {
+          code: 'EXPORT_NOT_IMPLEMENTED',
+          message: `La exportación de ${reportScope} en formato ${exportType} aún no está implementada.`,
+          timestamp: new Date().toISOString()
+        }
+      });
+
+    } catch (error) {
+      console.error('Error exporting report:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'EXPORT_ERROR',
           message: i18n.t('system.internal_error'),
           timestamp: new Date().toISOString()
         }

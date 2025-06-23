@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Search, Filter, Calendar, DollarSign, Car, AlertCircle, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import moment from 'moment-timezone';
 import Decimal from 'decimal.js';
+import { useAdminAuth } from '../../../hooks/useAdminAuth';
 
 interface Transaction {
   id: string;
@@ -35,6 +36,7 @@ interface TransactionHistoryProps {
 }
 
 export default function TransactionHistory({ filters }: TransactionHistoryProps) {
+  const { authenticatedFetch } = useAdminAuth();
   const [data, setData] = useState<TransactionHistoryData>({
     transactions: [],
     total: 0,
@@ -71,13 +73,11 @@ export default function TransactionHistory({ filters }: TransactionHistoryProps)
         search: searchTerm,
       });
 
-      const response = await fetch(`/api/admin/reports/transactions?${queryParams}`, {
-        credentials: 'include',
-      });
+      const response = await authenticatedFetch(`/api/admin/reports/transactions?${queryParams}`);
 
       if (response.ok) {
         const historyData = await response.json();
-        setData(historyData);
+        setData(historyData.data);
       }
     } catch (error) {
       console.error('Error fetching transaction history:', error);
@@ -98,8 +98,8 @@ export default function TransactionHistory({ filters }: TransactionHistoryProps)
   };
 
   const formatCurrency = (amount: string) => {
-    const value = new Decimal(amount);
-    return `$${value.toFixed(2)}`;
+    // API already returns formatted currency strings, so just return as-is
+    return amount || '$0.00';
   };
 
   const getTransactionIcon = (type: string) => {

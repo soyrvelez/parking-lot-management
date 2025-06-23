@@ -6,14 +6,13 @@
 
 import { Router } from 'express';
 import adminController from '../controllers/adminController';
-import { authMiddleware, requireRole } from '../middleware/auth';
+import { requireRole } from '../middleware/auth';
 import { validateRequest } from '../middleware/validation';
 import { z } from 'zod';
 
 const router = Router();
 
-// Apply authentication middleware to all admin routes  
-router.use(authMiddleware);
+// Authentication middleware already applied globally in app.ts
 
 // Validation schemas with Spanish error messages
 const createOperatorSchema = z.object({
@@ -31,6 +30,53 @@ const updateOperatorSchema = z.object({
     errorMap: () => ({ message: 'Rol debe ser ADMIN, MANAGER o VIEWER' })
   }).optional(),
   isActive: z.boolean().optional()
+});
+
+// CRITICAL: Admin pricing configuration validation schema
+const pricingConfigSchema = z.object({
+  minimumHours: z.number().min(0.25, 'Las horas mínimas deben ser al menos 0.25').max(24, 'Las horas mínimas no pueden exceder 24'),
+  minimumRate: z.string().refine(val => {
+    try {
+      const num = parseFloat(val);
+      return !isNaN(num) && isFinite(num) && num >= 0 && num <= 10000;
+    } catch {
+      return false;
+    }
+  }, 'La tarifa mínima debe ser un número válido entre 0 y 10000'),
+  incrementMinutes: z.number().min(5, 'Los minutos de incremento deben ser al menos 5').max(60, 'Los minutos de incremento no pueden exceder 60'),
+  incrementRate: z.string().refine(val => {
+    try {
+      const num = parseFloat(val);
+      return !isNaN(num) && isFinite(num) && num >= 0 && num <= 1000;
+    } catch {
+      return false;
+    }
+  }, 'La tarifa de incremento debe ser un número válido entre 0 y 1000'),
+  dailySpecialHours: z.number().min(1, 'Las horas especiales diarias deben ser al menos 1').max(24, 'Las horas especiales diarias no pueden exceder 24'),
+  dailySpecialRate: z.string().refine(val => {
+    try {
+      const num = parseFloat(val);
+      return !isNaN(num) && isFinite(num) && num >= 0 && num <= 20000;
+    } catch {
+      return false;
+    }
+  }, 'La tarifa especial diaria debe ser un número válido entre 0 y 20000'),
+  monthlyRate: z.string().refine(val => {
+    try {
+      const num = parseFloat(val);
+      return !isNaN(num) && isFinite(num) && num >= 0 && num <= 50000;
+    } catch {
+      return false;
+    }
+  }, 'La tarifa mensual debe ser un número válido entre 0 y 50000'),
+  lostTicketFee: z.string().refine(val => {
+    try {
+      const num = parseFloat(val);
+      return !isNaN(num) && isFinite(num) && num >= 0 && num <= 5000;
+    } catch {
+      return false;
+    }
+  }, 'El cargo por boleto perdido debe ser un número válido entre 0 y 5000')
 });
 
 /**
@@ -200,6 +246,17 @@ router.get('/reports/transactions',
 );
 
 /**
+ * GET /api/admin/reports/export
+ * Export reports in various formats (CSV, PDF)
+ * Query params: startDate, endDate, reportType, transactionType, exportType, reportScope
+ * Requires: ADMIN role
+ */
+router.get('/reports/export',
+  requireRole('admin'),
+  (req, res) => adminController.exportReport(req, res)
+);
+
+/**
  * GET /api/admin/hardware/status
  * Get hardware status information
  * Requires: ADMIN role
@@ -223,9 +280,11 @@ router.get('/config/pricing',
  * PUT /api/admin/config/pricing
  * Update pricing configuration
  * Requires: ADMIN role
+ * CRITICAL: Input validation prevents crashes
  */
 router.put('/config/pricing',
   requireRole('admin'),
+  validateRequest(pricingConfigSchema),
   (req, res) => adminController.updatePricingConfig(req, res)
 );
 

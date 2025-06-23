@@ -1,17 +1,13 @@
 import { useState, useEffect } from 'react';
 import { DollarSign, TrendingUp, TrendingDown, Car, Users, Clock, Calculator } from 'lucide-react';
 import Decimal from 'decimal.js';
+import { useAdminAuth } from '../../../hooks/useAdminAuth';
 
 interface ReportSummaryData {
   totalRevenue: string;
   totalTransactions: number;
-  averageTransaction: string;
-  totalVehicles: number;
-  averageStay: string;
-  revenueChange: string;
-  transactionChange: string;
-  peakHour: string;
-  cashOnHand: string;
+  averageTicketValue: string;
+  peakHours: Array<{ hour: string; count: number }>;
 }
 
 interface ReportSummaryProps {
@@ -24,16 +20,12 @@ interface ReportSummaryProps {
 }
 
 export default function ReportSummary({ filters }: ReportSummaryProps) {
+  const { authenticatedFetch } = useAdminAuth();
   const [data, setData] = useState<ReportSummaryData>({
-    totalRevenue: '0.00',
+    totalRevenue: '$0.00 pesos',
     totalTransactions: 0,
-    averageTransaction: '0.00',
-    totalVehicles: 0,
-    averageStay: '0h 0m',
-    revenueChange: '0.00',
-    transactionChange: '0.00',
-    peakHour: '12:00',
-    cashOnHand: '0.00',
+    averageTicketValue: '$0.00 pesos',
+    peakHours: [],
   });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -51,13 +43,11 @@ export default function ReportSummary({ filters }: ReportSummaryProps) {
         transactionType: filters.transactionType,
       });
 
-      const response = await fetch(`/api/admin/reports/summary?${queryParams}`, {
-        credentials: 'include',
-      });
+      const response = await authenticatedFetch(`/api/admin/reports/summary?${queryParams}`);
 
       if (response.ok) {
-        const summaryData = await response.json();
-        setData(summaryData);
+        const result = await response.json();
+        setData(result.data);
       }
     } catch (error) {
       console.error('Error fetching report summary:', error);
@@ -67,18 +57,15 @@ export default function ReportSummary({ filters }: ReportSummaryProps) {
   };
 
   const formatCurrency = (amount: string) => {
-    const value = new Decimal(amount);
-    return `$${value.toFixed(2)}`;
+    // API already returns formatted currency strings, so just return as-is
+    return amount || '$0.00 pesos';
   };
 
-  const formatChange = (change: string) => {
-    const value = new Decimal(change);
-    const isPositive = value.gte(0);
-    return {
-      value: `${isPositive ? '+' : ''}${value.toFixed(2)}%`,
-      color: isPositive ? 'text-green-600' : 'text-red-600',
-      icon: isPositive ? TrendingUp : TrendingDown,
-    };
+  const getPeakHour = () => {
+    if (data.peakHours && data.peakHours.length > 0) {
+      return data.peakHours[0].hour;
+    }
+    return '12:00';
   };
 
   const summaryCards = [
@@ -90,7 +77,6 @@ export default function ReportSummary({ filters }: ReportSummaryProps) {
       color: 'bg-green-500',
       bgColor: 'bg-green-50',
       textColor: 'text-green-600',
-      change: formatChange(data.revenueChange),
     },
     {
       title: 'Total Transacciones',
@@ -100,11 +86,10 @@ export default function ReportSummary({ filters }: ReportSummaryProps) {
       color: 'bg-blue-500',
       bgColor: 'bg-blue-50',
       textColor: 'text-blue-600',
-      change: formatChange(data.transactionChange),
     },
     {
-      title: 'Transacción Promedio',
-      value: formatCurrency(data.averageTransaction),
+      title: 'Ticket Promedio',
+      value: formatCurrency(data.averageTicketValue),
       subtitle: 'por operación',
       icon: TrendingUp,
       color: 'bg-purple-500',
@@ -112,31 +97,13 @@ export default function ReportSummary({ filters }: ReportSummaryProps) {
       textColor: 'text-purple-600',
     },
     {
-      title: 'Vehículos Atendidos',
-      value: data.totalVehicles.toLocaleString(),
-      subtitle: 'automóviles',
-      icon: Car,
+      title: 'Hora Pico',
+      value: getPeakHour(),
+      subtitle: 'mayor actividad',
+      icon: Clock,
       color: 'bg-indigo-500',
       bgColor: 'bg-indigo-50',
       textColor: 'text-indigo-600',
-    },
-    {
-      title: 'Estancia Promedio',
-      value: data.averageStay,
-      subtitle: 'tiempo por vehículo',
-      icon: Clock,
-      color: 'bg-yellow-500',
-      bgColor: 'bg-yellow-50',
-      textColor: 'text-yellow-600',
-    },
-    {
-      title: 'Hora Pico',
-      value: data.peakHour,
-      subtitle: 'mayor actividad',
-      icon: Users,
-      color: 'bg-pink-500',
-      bgColor: 'bg-pink-50',
-      textColor: 'text-pink-600',
     },
   ];
 
@@ -177,38 +144,31 @@ export default function ReportSummary({ filters }: ReportSummaryProps) {
           <div className="space-y-1">
             <p className="text-lg font-bold text-gray-900 truncate">{card.value}</p>
             
-            {card.change && (
-              <div className="flex items-center gap-1">
-                <card.change.icon className={`w-3 h-3 ${card.change.color}`} />
-                <span className={`text-xs font-medium ${card.change.color}`}>
-                  {card.change.value}
-                </span>
-                <span className="text-xs text-gray-500">vs anterior</span>
-              </div>
-            )}
           </div>
         </div>
       ))}
 
-      {/* Cash on Hand Card - Full Width */}
-      <div className="md:col-span-2 lg:col-span-3 xl:col-span-6">
-        <div className="bg-gradient-to-r from-green-50 to-green-100 p-6 rounded-lg border border-green-200">
+      {/* Peak Hours Summary - Full Width */}
+      <div className="md:col-span-2 lg:col-span-3 xl:col-span-4">
+        <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-6 rounded-lg border border-blue-200">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-green-200 rounded-lg flex items-center justify-center">
-                <DollarSign className="w-6 h-6 text-green-700" />
+              <div className="w-12 h-12 bg-blue-200 rounded-lg flex items-center justify-center">
+                <Clock className="w-6 h-6 text-blue-700" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-green-900">Efectivo en Caja</h3>
-                <p className="text-sm text-green-700">Saldo actual disponible</p>
+                <h3 className="text-lg font-semibold text-blue-900">Horas Pico</h3>
+                <p className="text-sm text-blue-700">Mayor actividad del período</p>
               </div>
             </div>
             
             <div className="text-right">
-              <div className="text-3xl font-bold text-green-900">
-                {formatCurrency(data.cashOnHand)}
+              <div className="text-2xl font-bold text-blue-900">
+                {data.peakHours.slice(0, 2).map(peak => peak.hour).join(', ') || 'N/A'}
               </div>
-              <div className="text-sm text-green-700">MXN</div>
+              <div className="text-sm text-blue-700">
+                {data.peakHours.length > 0 ? `${data.peakHours[0].count} transacciones` : 'Sin datos'}
+              </div>
             </div>
           </div>
         </div>

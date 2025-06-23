@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Download, FileText, Table, Calendar, CheckCircle, AlertCircle } from 'lucide-react';
+import { useAdminAuth } from '../../../hooks/useAdminAuth';
 
 interface ReportExportProps {
   filters: {
@@ -11,6 +12,7 @@ interface ReportExportProps {
 }
 
 export default function ReportExport({ filters }: ReportExportProps) {
+  const { authenticatedFetch } = useAdminAuth();
   const [isExporting, setIsExporting] = useState(false);
   const [lastExport, setLastExport] = useState<{
     type: string;
@@ -33,9 +35,8 @@ export default function ReportExport({ filters }: ReportExportProps) {
         reportScope,
       });
 
-      const response = await fetch(`/api/admin/reports/export?${queryParams}`, {
+      const response = await authenticatedFetch(`/api/admin/reports/export?${queryParams}`, {
         method: 'GET',
-        credentials: 'include',
       });
 
       if (response.ok) {
@@ -65,7 +66,7 @@ export default function ReportExport({ filters }: ReportExportProps) {
           type: `${reportScope} (${exportType.toUpperCase()})`,
           timestamp: new Date().toISOString(),
           status: 'error',
-          message: error.error || 'Error desconocido',
+          message: error.error?.message || error.message || error.error || 'Error desconocido',
         });
       }
     } catch (error) {
@@ -74,7 +75,7 @@ export default function ReportExport({ filters }: ReportExportProps) {
         type: `${reportScope} (${exportType.toUpperCase()})`,
         timestamp: new Date().toISOString(),
         status: 'error',
-        message: 'Error de conexión',
+        message: error instanceof Error ? error.message : 'Error de conexión',
       });
     } finally {
       setIsExporting(false);
