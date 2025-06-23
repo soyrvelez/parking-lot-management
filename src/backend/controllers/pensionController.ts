@@ -19,7 +19,15 @@ export class PensionController {
   private printerService: ThermalPrinterService;
 
   constructor() {
-    this.printerService = new ThermalPrinterService();
+    this.printerService = new ThermalPrinterService({
+      interfaceType: process.env.PRINTER_INTERFACE_TYPE as 'usb' | 'tcp' || 'usb',
+      devicePath: process.env.PRINTER_DEVICE_PATH || '/dev/usb/lp0',
+      host: process.env.PRINTER_HOST || '192.168.1.100',
+      port: parseInt(process.env.PRINTER_PORT || '9100'),
+      timeout: parseInt(process.env.PRINTER_TIMEOUT || '5000'),
+      retryAttempts: parseInt(process.env.PRINTER_RETRY_ATTEMPTS || '3'),
+      paperWidth: parseInt(process.env.PRINTER_PAPER_WIDTH || '32')
+    });
   }
 
   /**
@@ -178,7 +186,9 @@ export class PensionController {
           recentTransactions: customer.transactions.map(tx => ({
             id: tx.id,
             type: tx.type,
-            amount: Money.fromNumber(tx.amount.toNumber()).formatPesos(),
+            amount: tx.amount.toNumber() <= 9999.99 
+              ? Money.fromNumber(tx.amount.toNumber()).formatPesos()
+              : `$${tx.amount.toNumber().toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} pesos`,
             timestamp: i18n.formatDateTime(tx.timestamp),
             description: tx.description
           }))
@@ -283,7 +293,9 @@ export class PensionController {
         customerId: customer.id,
         name: customer.name,
         plateNumber: customer.plateNumber,
-        monthlyRate: Money.fromNumber(monthlyRate).formatPesos(),
+        monthlyRate: monthlyRate <= 9999.99 
+          ? Money.fromNumber(monthlyRate).formatPesos()
+          : `$${monthlyRate.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} pesos`,
         duration: `${durationMonths} meses`
       });
 
@@ -330,8 +342,14 @@ export class PensionController {
         );
       }
 
-      const monthlyRate = Money.fromNumber(customer.monthlyRate.toNumber());
-      const cashGiven = Money.fromNumber(cashReceived);
+      // Handle large amounts safely for monthly payments
+      const monthlyRate = customer.monthlyRate.toNumber() <= 9999.99
+        ? Money.fromNumber(customer.monthlyRate.toNumber())
+        : new Money(customer.monthlyRate.toString(), false);
+      
+      const cashGiven = cashReceived <= 9999.99 
+        ? Money.fromNumber(cashReceived)
+        : new Money(cashReceived.toString(), false);
 
       // Validate payment amount
       if (cashGiven.lessThan(monthlyRate)) {
@@ -469,24 +487,29 @@ export class PensionController {
         );
       }
 
-      const totalAmount = Money.fromNumber(customer.monthlyRate.toNumber() * durationMonths);
-      const cashGiven = Money.fromNumber(cashReceived);
+      // Calculate total using Decimal arithmetic to avoid Money class limits
+      const totalAmountDecimal = customer.monthlyRate.mul(durationMonths);
+      const totalAmountValue = totalAmountDecimal.toNumber();
+      
+      // Use raw numbers for validation since amounts may exceed Money class limits
+      const cashGivenValue = cashReceived;
 
-      // Validate payment amount
-      if (cashGiven.lessThan(totalAmount)) {
+      // Validate payment amount using raw numbers
+      if (cashGivenValue < totalAmountValue) {
+        const shortfall = totalAmountValue - cashGivenValue;
         throw new BusinessLogicError(
           i18n.t('parking.insufficient_payment'),
           'INSUFFICIENT_PAYMENT',
           400,
           { 
-            required: totalAmount.formatPesos(),
-            received: cashGiven.formatPesos(),
-            shortfall: totalAmount.subtract(cashGiven).formatPesos()
+            required: this.formatLargeAmount(totalAmountValue),
+            received: this.formatLargeAmount(cashGivenValue),
+            shortfall: this.formatLargeAmount(shortfall)
           }
         );
       }
 
-      const changeAmount = cashGiven.subtract(totalAmount);
+      const changeAmountValue = cashGivenValue - totalAmountValue;
 
       // Process renewal
       const result = await prisma.$transaction(async (tx) => {
@@ -494,7 +517,7 @@ export class PensionController {
         const transaction = await tx.transaction.create({
           data: {
             type: 'PENSION',
-            amount: totalAmount.toNumber(),
+            amount: totalAmountValue,
             pensionId: customer.id,
             description: `Renovación pensión ${durationMonths} meses - ${customer.name}`,
             operatorId
@@ -525,7 +548,7 @@ export class PensionController {
         customerId: result.customer.id,
         customerName: result.customer.name,
         duration: `${durationMonths} meses`,
-        amount: totalAmount.formatPesos(),
+        amount: this.formatLargeAmount(totalAmountValue),
         validUntil: i18n.formatDate(result.customer.endDate)
       });
 
@@ -671,6 +694,26 @@ export class PensionController {
 
     } catch (error) {
       throw error;
+    }
+  }
+
+  /**
+   * Safely format large amounts that may exceed Money class limits
+   */
+  private formatLargeAmount(amount: number): string {
+    try {
+      if (amount <= 9999.99) {
+        return Money.fromNumber(amount).formatPesos();
+      }
+      return `$${amount.toLocaleString('es-MX', { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+      })} pesos`;
+    } catch (error) {
+      return `$${amount.toLocaleString('es-MX', { 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 2 
+      })} pesos`;
     }
   }
 

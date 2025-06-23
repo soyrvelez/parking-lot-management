@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
@@ -16,6 +16,8 @@ import {
   Shield,
   Clock
 } from 'lucide-react';
+import AdminErrorBoundary from './AdminErrorBoundary';
+import { useAdminAuth } from '../../hooks/useAdminAuth';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
@@ -69,22 +71,13 @@ const navigation = [
 export default function AdminLayout({ children }: AdminLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const router = useRouter();
+  const { logout, user } = useAdminAuth();
 
-  const handleLogout = async () => {
-            try {
-              // For JWT authentication, logout is handled client-side
-              // Clear any local storage/session storage if needed
-              localStorage.removeItem('adminToken');
-              sessionStorage.removeItem('token');
-              
-              router.push('/admin/login');
-            } catch (error) {
-              console.error('Error al cerrar sesión:', error);
-              // Still redirect even if there's an error
-              router.push('/admin/login');
-            }
-          };
-;
+  // No authentication checks here - AdminProtectedRoute handles that
+
+  const handleLogout = () => {
+    logout();
+  };
 
   return (
     <div className="h-screen flex bg-gray-100">
@@ -161,7 +154,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
                 <Users className="w-4 h-4 text-gray-600" />
               </div>
               <div>
-                <div className="text-sm font-medium text-gray-900">Administrador</div>
+                <div className="text-sm font-medium text-gray-900">{user?.name || 'Administrador'}</div>
                 <div className="text-xs text-gray-500">Sesión activa</div>
               </div>
             </div>
@@ -190,10 +183,12 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
           <div className="w-10"></div>
         </div>
 
-        {/* Page content */}
+        {/* Page content with error boundary */}
         <main className="flex-1 overflow-y-auto">
-          <div className="p-6">
-            {children}
+          <div className="p-4 max-w-none">
+            <AdminErrorBoundary>
+              {children}
+            </AdminErrorBoundary>
           </div>
         </main>
       </div>

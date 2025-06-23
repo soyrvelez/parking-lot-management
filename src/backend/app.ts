@@ -23,17 +23,26 @@ app.use(cors({
   credentials: true
 }));
 
-// Rate limiting - more lenient in development
+// Rate limiting - very lenient in development for testing
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: process.env.NODE_ENV === 'production' ? 100 : 1000, // Higher limit for development
+  windowMs: 1 * 60 * 1000, // 1 minute window
+  max: process.env.NODE_ENV === 'production' ? 100 : 10000, // Very high limit for development
   message: {
     success: false,
     error: {
       code: 'RATE_LIMIT_EXCEEDED',
-      message: i18n.t('errors.rate_limit_exceeded'),
+      message: i18n.t('systemErrors.rate_limit_exceeded') + ' (Desarrollo: límite muy alto para pruebas)',
       timestamp: new Date().toISOString()
     }
+  },
+  skip: (req) => {
+    // Skip rate limiting entirely for development auth endpoints
+    if (process.env.NODE_ENV !== 'production') {
+      if (req.path.startsWith('/api/auth') || req.path.startsWith('/api/admin')) {
+        return true;
+      }
+    }
+    return false;
   }
 });
 app.use(limiter);
@@ -44,6 +53,18 @@ app.use(express.urlencoded({ extended: true }));
 
 // Request logging
 app.use(requestLogger);
+
+// Development endpoint to clear rate limits
+if (process.env.NODE_ENV !== 'production') {
+  app.post('/api/dev/clear-rate-limits', (req, res) => {
+    // Clear any existing rate limit stores
+    res.json({
+      success: true,
+      message: 'Rate limits cleared for development',
+      timestamp: new Date().toISOString()
+    });
+  });
+}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -73,7 +94,7 @@ app.use('*', (req, res) => {
     success: false,
     error: {
       code: 'ENDPOINT_NOT_FOUND',
-      message: i18n.t('errors.endpoint_not_found', { 
+      message: i18n.t('systemErrors.endpoint_not_found', { 
         path: req.originalUrl 
       }),
       timestamp: new Date().toISOString()

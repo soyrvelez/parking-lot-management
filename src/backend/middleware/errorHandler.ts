@@ -151,7 +151,17 @@ export function errorHandler(
     error: {
       code: errorCode,
       message: statusCode === 500 
-        ? i18n.t('errors.internal_server_error')
+        ? (() => {
+            const translation = i18n.t('systemErrors.internal_server_error');
+            console.error('[ErrorHandler] Translation result:', {
+              key: 'systemErrors.internal_server_error',
+              translation,
+              hasTranslations: !!i18n,
+              locale: i18n.getLocale?.()
+            });
+            // Fallback to hardcoded Spanish if translation fails
+            return translation.startsWith('[') ? 'Error interno del servidor' : translation;
+          })()
         : error.message,
       timestamp: new Date().toISOString(),
       requestId

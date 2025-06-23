@@ -2,7 +2,8 @@
  * Thermal Printer Service - Epson TM-T20III Integration
  * 
  * Provides comprehensive thermal printing functionality with:
- * - TCP connection management with retry logic
+ * - USB and TCP connection management with retry logic
+ * - Automatic USB device detection (/dev/usb/lp0, /dev/ttyUSB0)
  * - 58mm paper formatting (32 character width)
  * - Spanish character encoding (UTF-8) support
  * - Print queue for offline scenarios
@@ -12,6 +13,9 @@
 
 import { ThermalPrinter, PrinterTypes, CharacterSet, BreakLine } from 'node-thermal-printer';
 import { EventEmitter } from 'events';
+import { promises as fs } from 'fs';
+import { access, constants } from 'fs';
+import { promisify } from 'util';
 import { 
   PrinterConfig, 
   PrintJob, 
@@ -37,8 +41,10 @@ export class ThermalPrinterService extends EventEmitter {
     super();
     
     this.config = {
+      interfaceType: config?.interfaceType || HARDWARE_CONSTANTS.PRINTER.DEFAULT_INTERFACE_TYPE,
       host: config?.host || HARDWARE_CONSTANTS.PRINTER.DEFAULT_HOST,
       port: config?.port || HARDWARE_CONSTANTS.PRINTER.DEFAULT_PORT,
+      devicePath: config?.devicePath || this.detectUSBDevice(),
       timeout: config?.timeout || HARDWARE_CONSTANTS.PRINTER.DEFAULT_TIMEOUT,
       retryAttempts: config?.retryAttempts || HARDWARE_CONSTANTS.PRINTER.DEFAULT_RETRY_ATTEMPTS,
       retryDelay: config?.retryDelay || HARDWARE_CONSTANTS.PRINTER.DEFAULT_RETRY_DELAY,
@@ -64,13 +70,17 @@ export class ThermalPrinterService extends EventEmitter {
   }
 
   /**
-   * Initialize thermal printer with proper configuration
+   * Initialize thermal printer with proper configuration (USB or TCP)
    */
   private initializePrinter(): void {
     try {
+      const interfaceString = this.config.interfaceType === 'usb' 
+        ? `printer:${this.config.devicePath}`
+        : `tcp://${this.config.host}:${this.config.port}`;
+
       this.printer = new ThermalPrinter({
         type: PrinterTypes.EPSON,
-        interface: `tcp://${this.config.host}:${this.config.port}`,
+        interface: interfaceString,
         characterSet: CharacterSet.PC858_EURO,
         removeSpecialCharacters: false,
         lineCharacter: '-',
@@ -87,6 +97,56 @@ export class ThermalPrinterService extends EventEmitter {
   }
 
   /**
+   * Detect available USB thermal printer device
+   */
+  private detectUSBDevice(): string {
+    // Try to detect USB printer devices in order of preference
+    const usbDevices = [
+      HARDWARE_CONSTANTS.PRINTER.USB_SYMLINK,     // /dev/thermal-printer (udev rule)
+      HARDWARE_CONSTANTS.PRINTER.DEFAULT_USB_DEVICE, // /dev/usb/lp0
+      HARDWARE_CONSTANTS.PRINTER.ALTERNATIVE_USB_DEVICE, // /dev/ttyUSB0
+      '/dev/lp0',  // Standard line printer
+      '/dev/lp1'   // Alternative line printer
+    ];
+
+    // Return the first available device (will be validated during connection)
+    return usbDevices[0];
+  }
+
+  /**
+   * Check if USB device exists and is accessible
+   */
+  private async checkUSBDevice(devicePath: string): Promise<boolean> {
+    try {
+      await fs.access(devicePath, constants.R_OK | constants.W_OK);
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
+   * Find available USB printer device
+   */
+  private async findUSBDevice(): Promise<string | null> {
+    const usbDevices = [
+      HARDWARE_CONSTANTS.PRINTER.USB_SYMLINK,
+      HARDWARE_CONSTANTS.PRINTER.DEFAULT_USB_DEVICE,
+      HARDWARE_CONSTANTS.PRINTER.ALTERNATIVE_USB_DEVICE,
+      '/dev/lp0',
+      '/dev/lp1'
+    ];
+
+    for (const device of usbDevices) {
+      if (await this.checkUSBDevice(device)) {
+        return device;
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Connect to thermal printer with retry logic
    */
   public async connect(): Promise<boolean> {
@@ -96,6 +156,28 @@ export class ThermalPrinterService extends EventEmitter {
 
     this.connectionState = 'CONNECTING';
     this.emit('connecting');
+
+    // For USB connections, validate device availability first
+    if (this.config.interfaceType === 'usb') {
+      const availableDevice = await this.findUSBDevice();
+      if (!availableDevice) {
+        const errorMessage = i18n.t('hardware.usb_device_not_found');
+        this.handleError('CONNECTION', 'USB_DEVICE_NOT_FOUND', errorMessage);
+        this.connectionState = 'ERROR';
+        this.status.connected = false;
+        this.status.online = false;
+        this.emit('disconnected');
+        this.emit('statusUpdate', this.status);
+        this.scheduleReconnect();
+        return false;
+      }
+      
+      // Update device path if a different device was found
+      if (availableDevice !== this.config.devicePath) {
+        this.config.devicePath = availableDevice;
+        this.initializePrinter(); // Reinitialize with new device path
+      }
+    }
 
     let attempts = 0;
     while (attempts < this.config.retryAttempts) {
@@ -123,7 +205,12 @@ export class ThermalPrinterService extends EventEmitter {
         }
       } catch (error) {
         attempts++;
-        const errorMessage = i18n.t('hardware.connection_failed', { attempt: attempts, max: this.config.retryAttempts });
+        const connectionType = this.config.interfaceType === 'usb' ? 'USB' : 'TCP';
+        const errorMessage = i18n.t('hardware.connection_failed', { 
+          type: connectionType,
+          attempt: attempts, 
+          max: this.config.retryAttempts 
+        });
         
         if (attempts < this.config.retryAttempts) {
           this.emit('connectionRetry', { attempt: attempts, error: errorMessage });
@@ -261,10 +348,12 @@ export class ThermalPrinterService extends EventEmitter {
     lines.push(i18n.t('receipt.plate_number', { plate: data.plateNumber }));
     lines.push('');
     
-    // Entry time
-    lines.push(i18n.t('receipt.entry_time', { 
-      time: i18n.formatDateTime(data.entryTime) 
-    }));
+    // Entry time (if available)
+    if (data.entryTime) {
+      lines.push(i18n.t('receipt.entry_time', { 
+        time: i18n.formatDateTime(data.entryTime) 
+      }));
+    }
     lines.push('');
     
     // Instructions
@@ -302,9 +391,11 @@ export class ThermalPrinterService extends EventEmitter {
     lines.push('');
     
     // Time details
-    lines.push(i18n.t('receipt.entry_time', { 
-      time: i18n.formatDateTime(data.entryTime) 
-    }));
+    if (data.entryTime) {
+      lines.push(i18n.t('receipt.entry_time', { 
+        time: i18n.formatDateTime(data.entryTime) 
+      }));
+    }
     lines.push(i18n.t('receipt.exit_time', { 
       time: i18n.formatDateTime(data.exitTime!) 
     }));
@@ -622,7 +713,7 @@ export class ThermalPrinterService extends EventEmitter {
   }
 
   /**
-   * Perform health check
+   * Perform health check (USB and TCP)
    */
   private async performHealthCheck(): Promise<void> {
     if (!this.printer || !this.status.connected) {
@@ -630,7 +721,19 @@ export class ThermalPrinterService extends EventEmitter {
     }
 
     try {
-      const isConnected = await this.printer.isPrinterConnected();
+      let isConnected = false;
+      
+      if (this.config.interfaceType === 'usb') {
+        // For USB, check if device still exists and is accessible
+        const deviceAvailable = await this.checkUSBDevice(this.config.devicePath!);
+        if (deviceAvailable) {
+          isConnected = await this.printer.isPrinterConnected();
+        }
+      } else {
+        // For TCP, just check printer connection
+        isConnected = await this.printer.isPrinterConnected();
+      }
+      
       if (!isConnected && this.status.connected) {
         this.status.connected = false;
         this.status.online = false;

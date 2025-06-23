@@ -3,6 +3,7 @@ import { PrismaClient } from '@prisma/client';
 import { BarcodeScannerService } from '../services/scanner/barcode-scanner.service';
 import { ThermalPrinterService } from '../services/printer/thermal-printer.service';
 import { Money } from '../../shared/utils/money';
+import { generateBarcode, withAtomicRetry } from '../../shared/utils/id-generation';
 import { i18n } from '../../shared/localization';
 import { BusinessLogicError, HardwareError } from '../middleware/errorHandler';
 import { auditLogger } from '../middleware/logging';
@@ -21,91 +22,164 @@ export class ParkingController {
 
   constructor() {
     this.scannerService = new BarcodeScannerService();
-    this.printerService = new ThermalPrinterService();
+    this.printerService = new ThermalPrinterService({
+      interfaceType: process.env.PRINTER_INTERFACE_TYPE as 'usb' | 'tcp' || 'usb',
+      devicePath: process.env.PRINTER_DEVICE_PATH || '/dev/usb/lp0',
+      host: process.env.PRINTER_HOST || '192.168.1.100',
+      port: parseInt(process.env.PRINTER_PORT || '9100'),
+      timeout: parseInt(process.env.PRINTER_TIMEOUT || '5000'),
+      retryAttempts: parseInt(process.env.PRINTER_RETRY_ATTEMPTS || '3'),
+      paperWidth: parseInt(process.env.PRINTER_PAPER_WIDTH || '32')
+    });
   }
 
   async createEntry(req: Request, res: Response): Promise<void> {
-    const { plateNumber, vehicleType, operatorId, notes }: EntryRequest = req.body;
-    
-    try {
-      // Check for existing active ticket
-      const existingTicket = await prisma.ticket.findFirst({
-        where: {
-          plateNumber,
-          status: 'ACTIVE'
+      const { plateNumber, vehicleType, operatorId, notes }: EntryRequest = req.body;
+      
+      try {
+        console.log(`[ENTRY] Checking for existing ticket with plate: "${plateNumber}"`);
+        
+        // Check for existing active ticket
+        const existingTicket = await prisma.ticket.findFirst({
+          where: {
+            plateNumber: plateNumber.toUpperCase(), // Ensure consistent case
+            status: 'ACTIVE'
+          }
+        });
+        
+        if (existingTicket) {
+          console.log(`[ENTRY] Found existing active ticket: ID=${existingTicket.id}, Plate=${existingTicket.plateNumber}`);
+        } else {
+          console.log(`[ENTRY] No existing active ticket found for plate: "${plateNumber.toUpperCase()}"`);
         }
+  
+        if (existingTicket) {
+          throw new BusinessLogicError(
+            i18n.t('parking.vehicle_already_inside'),
+            'VEHICLE_ALREADY_INSIDE',
+            409,
+            { plateNumber, existingTicket: existingTicket.id }
+          );
+        }
+  
+        const entryTime = new Date();
+        
+        // Get pricing configuration
+        const pricing = await prisma.pricingConfig.findFirst({
+          where: { isActive: true },
+          orderBy: { createdAt: 'desc' }
+        });
+
+        if (!pricing) {
+          throw new BusinessLogicError(
+            i18n.t('system.pricing_not_configured'),
+            'PRICING_NOT_CONFIGURED',
+            500
+          );
+        }
+        
+        // Use atomic transaction with retry logic to handle concurrency
+        const ticket = await withAtomicRetry(prisma, async (tx) => {
+          // Let Prisma generate the ID automatically (CUID)
+          const newTicket = await tx.ticket.create({
+            data: {
+              plateNumber: plateNumber.toUpperCase(),
+              entryTime,
+              status: 'ACTIVE',
+              barcode: '', // Will be updated after creation
+              vehicleType,
+              notes
+            }
+          });
+  
+          // Generate barcode using the actual ticket ID
+          const barcode = generateBarcode(newTicket.id, newTicket.plateNumber);
+          
+          // Update with the barcode
+          const updatedTicket = await tx.ticket.update({
+            where: { id: newTicket.id },
+            data: { barcode }
+          });
+  
+          return updatedTicket;
+        });
+  
+        // Print entry ticket
+        try {
+          await this.printerService.printEntryTicket({
+            ticketNumber: ticket.id,
+            plateNumber: ticket.plateNumber,
+            entryTime: ticket.entryTime,
+            totalAmount: new Money(pricing.minimumRate).toNumber(),
+            type: 'ENTRY'
+          });
+        } catch (printError) {
+          // Log print failure but don't fail the entry
+          console.error('Failed to print entry ticket:', printError);
+          
+          // Queue for retry handled internally by printEntryTicket
+        }
+  
+        // Log entry
+        auditLogger('VEHICLE_ENTRY', operatorId, {
+          ticketNumber: ticket.id,
+          plateNumber: ticket.plateNumber,
+          vehicleType,
+          entryTime: ticket.entryTime
+        });
+  
+        res.status(201).json({
+          success: true,
+          data: {
+            ticketNumber: ticket.id,
+            plateNumber: ticket.plateNumber,
+            entryTime: ticket.entryTime.toISOString(),
+            barcode: ticket.barcode!,
+            estimatedFee: new Money(pricing.minimumRate).formatPesos(),
+            message: i18n.t('parking.entry_successful')
+          },
+          timestamp: new Date().toISOString()
+        });
+  
+      } catch (error) {
+        throw error;
+      }
+    }
+
+  async getPricingConfig(req: Request, res: Response): Promise<void> {
+    try {
+      const pricing = await prisma.pricingConfig.findFirst({
+        where: { isActive: true },
+        orderBy: { createdAt: 'desc' }
       });
 
-      if (existingTicket) {
+      if (!pricing) {
         throw new BusinessLogicError(
-          i18n.t('parking.vehicle_already_inside'),
-          'VEHICLE_ALREADY_INSIDE',
-          409,
-          { plateNumber, existingTicket: existingTicket.id }
+          i18n.t('system.pricing_not_configured'),
+          'PRICING_NOT_CONFIGURED',
+          500
         );
       }
 
-      // Generate ticket number
-      const ticketNumber = `T-${Date.now().toString().slice(-6)}`;
-      const entryTime = new Date();
-      
-      // Generate barcode for the ticket
-      const barcode = `${ticketNumber}-${plateNumber}`.toUpperCase();
-
-      // Create ticket record
-      const ticket = await prisma.ticket.create({
-        data: {
-          id: ticketNumber,
-          plateNumber: plateNumber.toUpperCase(),
-          entryTime,
-          status: 'ACTIVE',
-          barcode,
-          vehicleType,
-          notes
-        }
-      });
-
-      // Print entry ticket
-      try {
-        await this.printerService.printEntryTicket({
-          ticketNumber: ticket.id,
-          plateNumber: ticket.plateNumber,
-          entryTime: ticket.entryTime,
-          totalAmount: 25.00,
-          type: 'ENTRY'
-        });
-      } catch (printError) {
-        // Log print failure but don't fail the entry
-        console.error('Failed to print entry ticket:', printError);
-        
-        // Queue for retry handled internally by printEntryTicket
-      }
-
-      // Log entry
-      auditLogger('VEHICLE_ENTRY', operatorId, {
-        ticketNumber: ticket.id,
-        plateNumber: ticket.plateNumber,
-        vehicleType,
-        entryTime: ticket.entryTime
-      });
-
-      res.status(201).json({
+      res.status(200).json({
         success: true,
         data: {
-          ticketNumber: ticket.id,
-          plateNumber: ticket.plateNumber,
-          entryTime: i18n.formatDateTime(ticket.entryTime),
-          barcode: ticket.barcode!,
-          estimatedFee: Money.fromNumber(25).formatPesos(),
-          message: i18n.t('parking.entry_successful')
+          minimumRate: pricing.minimumRate.toString(),
+          minimumHours: pricing.minimumHours,
+          incrementRate: pricing.incrementRate.toString(),
+          incrementMinutes: pricing.incrementMinutes,
+          monthlyRate: pricing.monthlyRate.toString(),
+          lostTicketFee: pricing.lostTicketFee.toString(),
+          dailySpecialHours: pricing.dailySpecialHours,
+          dailySpecialRate: pricing.dailySpecialRate?.toString() || null
         },
         timestamp: new Date().toISOString()
       });
-
     } catch (error) {
       throw error;
     }
   }
+
 
   async calculateFee(req: Request, res: Response): Promise<void> {
     const { ticketNumber, barcode, exitTime }: CalculateRequest = req.body;
@@ -144,7 +218,21 @@ export class ParkingController {
         );
       }
 
-      const currentExitTime = exitTime ? new Date(exitTime) : new Date();
+      // Validate and parse exit time with proper error handling
+      let currentExitTime: Date;
+      if (exitTime) {
+        currentExitTime = new Date(exitTime);
+        // Check if the date is valid
+        if (isNaN(currentExitTime.getTime())) {
+          throw new BusinessLogicError(
+            'Hora de salida inválida proporcionada',
+            'INVALID_EXIT_TIME',
+            400
+          );
+        }
+      } else {
+        currentExitTime = new Date();
+      }
       const durationMinutes = Math.floor((currentExitTime.getTime() - ticket.entryTime.getTime()) / (1000 * 60));
 
       // Get pricing configuration
@@ -260,8 +348,8 @@ export class ParkingController {
       // Calculate change
       const changeAmount = cashGiven.subtract(totalAmount);
 
-      // Update ticket in database transaction
-      const updatedTicket = await prisma.$transaction(async (tx) => {
+      // Update ticket in database transaction with retry logic
+      const updatedTicket = await withAtomicRetry(prisma, async (tx) => {
         // Update ticket
         const updated = await tx.ticket.update({
           where: { id: ticketNumber },
@@ -447,6 +535,7 @@ export class ParkingController {
         }
   
         const lostTicketFee = Money.fromNumber(pricing.lostTicketFee.toNumber());
+        let lostTicket: any = null;
         const cashGiven = Money.fromNumber(cashReceived);
   
         // Validate payment amount
@@ -468,7 +557,7 @@ export class ParkingController {
   
         if (activeTicket) {
           // Found existing ticket - mark as lost and paid
-          await prisma.$transaction(async (tx) => {
+          await withAtomicRetry(prisma, async (tx) => {
             // Update existing ticket
             await tx.ticket.update({
               where: { id: activeTicket.id },
@@ -510,7 +599,7 @@ export class ParkingController {
               plateNumber: activeTicket.plateNumber,
               entryTime: i18n.formatDateTime(activeTicket.entryTime),
               exitTime: i18n.formatDateTime(exitTime),
-              lostTicketFee: lostTicketFee.formatPesos(),
+              penalty: lostTicketFee.formatPesos(),
               cashReceived: cashGiven.formatPesos(),
               changeGiven: changeAmount.formatPesos(),
               paymentTime: i18n.formatDateTime(new Date()),
@@ -521,26 +610,21 @@ export class ParkingController {
   
         } else {
           // No active ticket found - create lost ticket record for audit
-          const lostTicketId = `L-${Date.now().toString().slice(-6)}`;
-          
-          await prisma.$transaction(async (tx) => {
-            // Create lost ticket record
-            const lostTicket = await tx.ticket.create({
+          lostTicket = await withAtomicRetry(prisma, async (tx) => {
+            // Create lost ticket record with auto-generated ID
+            return await tx.ticket.create({
               data: {
-                id: lostTicketId,
                 plateNumber: plateNumber.toUpperCase(),
                 entryTime: new Date(Date.now() - 4 * 60 * 60 * 1000), // Estimate 4 hours ago
                 exitTime,
                 totalAmount: lostTicketFee.toNumber(),
                 status: 'LOST',
-                barcode: `LOST-${plateNumber.toUpperCase()}`,
-                paidAt: new Date(),
-                paymentMethod: 'CASH',
+                barcode: generateBarcode('LOST', plateNumber.toUpperCase()),
                 failureReason: 'No original ticket found - lost ticket fee applied',
                 operatorId
               }
             });
-  
+
             // Create transaction record
             await tx.transaction.create({
               data: {
@@ -551,11 +635,13 @@ export class ParkingController {
                 operatorId
               }
             });
+
+            return lostTicket;
           });
   
           // Log lost ticket processing without original
           auditLogger('LOST_TICKET_NO_ORIGINAL', operatorId, {
-            ticketNumber: lostTicketId,
+            ticketNumber: lostTicket.id,
             plateNumber: plateNumber.toUpperCase(),
             lostTicketFee: lostTicketFee.formatPesos(),
             cashReceived: cashGiven.formatPesos(),
@@ -565,9 +651,9 @@ export class ParkingController {
           res.json({
             success: true,
             data: {
-              ticketNumber: lostTicketId,
+              ticketNumber: lostTicket.id,
               plateNumber: plateNumber.toUpperCase(),
-              lostTicketFee: lostTicketFee.formatPesos(),
+              penalty: lostTicketFee.formatPesos(),
               cashReceived: cashGiven.formatPesos(),
               changeGiven: changeAmount.formatPesos(),
               paymentTime: i18n.formatDateTime(new Date()),
@@ -579,8 +665,9 @@ export class ParkingController {
   
         // Try to print lost ticket receipt
         try {
+          const ticketForPrint = activeTicket || lostTicket;
           await this.printerService.printLostTicketReceipt({
-            ticketNumber: 'LOST-' + Date.now().toString().slice(-6),
+            ticketNumber: ticketForPrint.id,
             plateNumber: plateNumber.toUpperCase(),
             entryTime: new Date(),
             lostTicketFee: lostTicketFee.toNumber(),
@@ -598,6 +685,7 @@ export class ParkingController {
         throw error;
       }
     }
+
 
 
   async getStatus(req: Request, res: Response): Promise<void> {
@@ -621,7 +709,11 @@ export class ParkingController {
         success: true,
         data: {
           activeVehicles: activeTickets,
-          todayRevenue: Money.fromNumber(typeof todayRevenue._sum.amount === 'number' ? todayRevenue._sum.amount : 0).formatPesos(),
+          todayRevenue: Money.fromNumber(
+            todayRevenue._sum.amount 
+              ? (todayRevenue._sum.amount as any).toNumber() 
+              : 0
+          ).formatPesos(),
           hardware: {
             scanner: this.scannerService.getStatus(),
             printer: this.printerService.getStatus()
@@ -740,7 +832,21 @@ export class ParkingController {
           );
         }
   
-        const currentExitTime = exitTime ? new Date(exitTime as string) : new Date();
+        // Validate and parse exit time with proper error handling
+        let currentExitTime: Date;
+        if (exitTime) {
+          currentExitTime = new Date(exitTime as string);
+          // Check if the date is valid
+          if (isNaN(currentExitTime.getTime())) {
+            throw new BusinessLogicError(
+              'Hora de salida inválida proporcionada',
+              'INVALID_EXIT_TIME',
+              400
+            );
+          }
+        } else {
+          currentExitTime = new Date();
+        }
         const durationMinutes = Math.floor((currentExitTime.getTime() - ticket.entryTime.getTime()) / (1000 * 60));
   
         // Get pricing configuration
@@ -834,12 +940,18 @@ export class ParkingController {
     const { barcode } = req.params;
     
     try {
-      // Find ticket by barcode or ID
+      console.log(`[LOOKUP] Searching for ticket with term: "${barcode}"`);
+      
+      // Find ticket by barcode, ID, or plate number (for manual entry)
       const ticket = await prisma.ticket.findFirst({
         where: {
           OR: [
             { barcode: barcode },
-            { id: barcode }
+            { id: barcode },
+            { 
+              plateNumber: barcode.toUpperCase(),
+              status: 'ACTIVE'  // Only find active tickets when searching by plate
+            }
           ]
         },
         include: {
@@ -848,13 +960,22 @@ export class ParkingController {
           }
         }
       });
+      
+      if (ticket) {
+        console.log(`[LOOKUP] Found ticket: ID=${ticket.id}, Plate=${ticket.plateNumber}, Status=${ticket.status}`);
+      } else {
+        console.log(`[LOOKUP] No ticket found for search term: "${barcode}"`);
+      }
 
       if (!ticket) {
         throw new BusinessLogicError(
           i18n.t('parking.ticket_not_found'),
           'TICKET_NOT_FOUND',
           404,
-          { barcode }
+          { 
+            searchTerm: barcode,
+            searchTypes: ['barcode', 'ticketId', 'plateNumber (active only)']
+          }
         );
       }
 

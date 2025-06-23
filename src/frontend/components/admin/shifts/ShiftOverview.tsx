@@ -42,7 +42,7 @@ export default function ShiftOverview() {
 
   useEffect(() => {
     fetchShiftOverview();
-    const interval = setInterval(fetchShiftOverview, 30000); // Update every 30 seconds
+    const interval = setInterval(fetchShiftOverview, 5 * 60 * 1000); // Much less aggressive polling - every 5 minutes
     return () => clearInterval(interval);
   }, []);
 

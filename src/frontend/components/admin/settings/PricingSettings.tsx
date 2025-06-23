@@ -4,6 +4,8 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { DollarSign, Save, RefreshCw, AlertCircle, CheckCircle } from 'lucide-react';
 import Decimal from 'decimal.js';
+import { useAdminErrorHandler } from '../AdminErrorBoundary';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 
 const pricingSchema = z.object({
   minimumHours: z.number().min(0.25).max(24),
@@ -57,6 +59,8 @@ export default function PricingSettings() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const { handleError } = useAdminErrorHandler();
+  const { authenticatedFetch, requireAuth } = useAdminAuth();
 
   const {
     register,
@@ -81,21 +85,32 @@ export default function PricingSettings() {
   const watchedValues = watch();
 
   useEffect(() => {
-    fetchPricingConfig();
+    if (requireAuth()) {
+      fetchPricingConfig();
+    }
   }, []);
 
   const fetchPricingConfig = async () => {
     try {
-      const response = await fetch('/api/admin/config/pricing', {
-        credentials: 'include',
-      });
+      const response = await authenticatedFetch('/api/admin/config/pricing');
 
       if (response.ok) {
-        const config = await response.json();
-        reset(config);
+        const result = await response.json();
+        if (result.success && result.data) {
+          reset(result.data);
+        } else {
+          throw new Error(result.error?.message || 'Error al cargar configuración');
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `Error del servidor: ${response.status}`);
       }
-    } catch (error) {
-      console.error('Error fetching pricing config:', error);
+    } catch (error: any) {
+      handleError(error, 'fetchPricingConfig');
+      setMessage({ 
+        type: 'error', 
+        text: error.message || 'Error al cargar la configuración de precios' 
+      });
     } finally {
       setIsLoading(false);
     }
@@ -106,47 +121,119 @@ export default function PricingSettings() {
     setMessage(null);
 
     try {
-      const response = await fetch('/api/admin/config/pricing', {
+      // DEFENSIVE: Validate data before sending
+      const validatedData = pricingSchema.parse(data);
+      
+      const response = await authenticatedFetch('/api/admin/config/pricing', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify(data),
+        body: JSON.stringify(validatedData),
       });
 
-      if (response.ok) {
-        setMessage({ type: 'success', text: 'Configuración de precios actualizada exitosamente' });
-        reset(data); // Reset form to mark as not dirty
+      const result = await response.json();
+
+      if (response.ok && result.success) {
+        setMessage({ 
+          type: 'success', 
+          text: result.data?.message || 'Configuración de precios actualizada exitosamente' 
+        });
+        reset(validatedData); // Reset form to mark as not dirty
       } else {
-        const error = await response.json();
-        setMessage({ type: 'error', text: error.error || 'Error al actualizar la configuración' });
+        // Handle different error types with specific Spanish messages
+        let errorMessage = 'Error al actualizar la configuración';
+        
+        if (result.error) {
+          switch (result.error.code) {
+            case 'INVALID_NUMERIC_VALUES':
+              errorMessage = 'Los valores ingresados no son números válidos';
+              break;
+            case 'NUMERIC_RANGE_ERROR':
+              errorMessage = 'Los valores ingresados están fuera del rango permitido';
+              break;
+            case 'DUPLICATE_CONFIG_ERROR':
+              errorMessage = 'Ya existe una configuración similar';
+              break;
+            case 'VALIDATION_ERROR':
+              errorMessage = 'Los datos ingresados no son válidos';
+              break;
+            default:
+              errorMessage = result.error.message || errorMessage;
+          }
+        }
+        
+        setMessage({ type: 'error', text: errorMessage });
       }
-    } catch (error) {
-      setMessage({ type: 'error', text: 'Error de conexión. Verifique la red.' });
+    } catch (error: any) {
+      handleError(error, 'onSubmit');
+      
+      let errorMessage = 'Error de conexión. Verifique la red.';
+      
+      if (error.name === 'ZodError') {
+        errorMessage = 'Los datos ingresados no son válidos. Verifique todos los campos.';
+      } else if (error.message?.includes('fetch')) {
+        errorMessage = 'Error de conexión. Verifique su conexión a internet.';
+      } else if (error.message?.includes('JSON')) {
+        errorMessage = 'Error de formato de datos. Intente nuevamente.';
+      }
+      
+      setMessage({ type: 'error', text: errorMessage });
     } finally {
       setIsSaving(false);
     }
   };
 
   const calculateExample = () => {
-    const minimumRate = new Decimal(watchedValues.minimumRate || '0');
-    const incrementRate = new Decimal(watchedValues.incrementRate || '0');
-    const hours = 3; // Example: 3 hours
+    try {
+      // DEFENSIVE: Handle invalid input values gracefully
+      const minimumRateStr = watchedValues.minimumRate || '0';
+      const incrementRateStr = watchedValues.incrementRate || '0';
+      
+      // Validate numeric strings before creating Decimals
+      if (!/^\d*\.?\d*$/.test(minimumRateStr) || !/^\d*\.?\d*$/.test(incrementRateStr)) {
+        return {
+          hours: 3,
+          total: '0.00',
+          breakdown: {
+            minimum: '0.00',
+            additional: '0.00',
+            increments: 0,
+          },
+          error: 'Valores inválidos'
+        };
+      }
 
-    const additionalHours = Math.max(0, hours - watchedValues.minimumHours);
-    const incrementsNeeded = Math.ceil((additionalHours * 60) / watchedValues.incrementMinutes);
-    const total = minimumRate.plus(incrementRate.times(incrementsNeeded));
+      const minimumRate = new Decimal(minimumRateStr);
+      const incrementRate = new Decimal(incrementRateStr);
+      const hours = 3; // Example: 3 hours
+      const minHours = watchedValues.minimumHours || 1;
+      const incMinutes = watchedValues.incrementMinutes || 15;
 
-    return {
-      hours,
-      total: total.toFixed(2),
-      breakdown: {
-        minimum: minimumRate.toFixed(2),
-        additional: incrementRate.times(incrementsNeeded).toFixed(2),
-        increments: incrementsNeeded,
-      },
-    };
+      const additionalHours = Math.max(0, hours - minHours);
+      const incrementsNeeded = Math.ceil((additionalHours * 60) / incMinutes);
+      const additional = incrementRate.times(incrementsNeeded);
+      const total = minimumRate.plus(additional);
+
+      return {
+        hours,
+        total: total.toFixed(2),
+        breakdown: {
+          minimum: minimumRate.toFixed(2),
+          additional: additional.toFixed(2),
+          increments: incrementsNeeded,
+        },
+      };
+    } catch (error: any) {
+      handleError(error, 'calculateExample');
+      return {
+        hours: 3,
+        total: '0.00',
+        breakdown: {
+          minimum: '0.00',
+          additional: '0.00',
+          increments: 0,
+        },
+        error: 'Error en cálculo'
+      };
+    }
   };
 
   const example = calculateExample();

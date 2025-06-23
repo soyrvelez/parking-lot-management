@@ -5,11 +5,21 @@ import {
   EntryRequestSchema,
   CalculateRequestSchema,
   PaymentRequestSchema,
+  LostTicketRequestSchema,
   ExitRequestSchema
 } from '../types/api';
 
 const router = Router();
 const parkingController = new ParkingController();
+
+// Get pricing configuration (public endpoint for operators)
+router.get('/pricing', async (req, res, next) => {
+  try {
+    await parkingController.getPricingConfig(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
 
 // Get ticket status by ID
 router.get(
@@ -63,7 +73,7 @@ router.post('/exit', validateRequest(ExitRequestSchema), async (req, res, next) 
 });
 
 // Lost ticket handling
-router.post('/lost-ticket', validateRequest(PaymentRequestSchema), async (req, res, next) => {
+router.post('/lost-ticket', validateRequest(LostTicketRequestSchema), async (req, res, next) => {
   try {
     await parkingController.processLostTicket(req, res);
   } catch (error) {
@@ -74,7 +84,7 @@ router.post('/lost-ticket', validateRequest(PaymentRequestSchema), async (req, r
 // Ticket lookup by barcode/ID for scanner
 router.get('/tickets/lookup/:barcode', async (req, res, next) => {
   try {
-    await parkingController.lookupTicket(req, res, next);
+    await parkingController.lookupTicket(req, res);
   } catch (error) {
     next(error);
   }

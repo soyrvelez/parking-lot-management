@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Shield, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { useAdminAuth, DEFAULT_ADMIN_CREDENTIALS } from '../../hooks/useAdminAuth';
 
 const loginSchema = z.object({
   username: z.string().min(1, 'Usuario requerido'),
@@ -15,46 +16,38 @@ type LoginForm = z.infer<typeof loginSchema>;
 export default function AdminLogin() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const { login, isAuthenticated, isLoading: authLoading } = useAdminAuth();
 
   const {
     register,
     handleSubmit,
     formState: { errors },
+    setValue
   } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
+    defaultValues: {
+      username: DEFAULT_ADMIN_CREDENTIALS.username,
+      password: DEFAULT_ADMIN_CREDENTIALS.password
+    }
   });
 
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.push('/admin');
+    }
+  }, [isAuthenticated, router]);
+
   const onSubmit = async (data: LoginForm) => {
-    setIsLoading(true);
     setError('');
 
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(data),
-        credentials: 'include',
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        // Store the JWT token
-        if (result.data?.token) {
-          localStorage.setItem('adminToken', result.data.token);
-        }
-        router.push('/admin');
-      } else {
-        setError(result.error?.message || 'Credenciales inválidas');
-      }
-    } catch (err) {
-      setError('Error de conexión. Verifique la red.');
-    } finally {
-      setIsLoading(false);
+    const result = await login(data.username, data.password);
+    
+    if (result.success) {
+      router.push('/admin');
+    } else {
+      setError(result.error || 'Error al iniciar sesión');
     }
   };
 
@@ -132,10 +125,10 @@ export default function AdminLogin() {
 
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={authLoading}
               className="btn-primary w-full flex items-center justify-center gap-2"
             >
-              {isLoading ? (
+              {authLoading ? (
                 <>
                   <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full"></div>
                   Iniciando Sesión...
@@ -150,9 +143,15 @@ export default function AdminLogin() {
           </form>
 
           <div className="mt-6 text-center">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 mb-2">
               Acceso restringido a administradores autorizados
             </p>
+            {process.env.NODE_ENV === 'development' && (
+              <div className="text-xs text-blue-600 bg-blue-50 p-2 rounded">
+                <p><strong>Desarrollo:</strong></p>
+                <p>Usuario: admin | Contraseña: admin123</p>
+              </div>
+            )}
           </div>
         </div>
 

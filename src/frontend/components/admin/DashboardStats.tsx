@@ -115,15 +115,15 @@ export default function DashboardStats() {
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {[...Array(4)].map((_, i) => (
-          <div key={i} className="bg-white p-6 rounded-lg shadow-sm border animate-pulse">
-            <div className="flex items-center gap-4">
-              <div className="w-12 h-12 bg-gray-200 rounded-lg"></div>
-              <div className="flex-1">
-                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                <div className="h-6 bg-gray-200 rounded w-1/2 mb-1"></div>
-                <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+          <div key={i} className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border animate-pulse">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-200 rounded-lg flex-shrink-0"></div>
+              <div className="flex-1 min-w-0">
+                <div className="h-3 sm:h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
+                <div className="h-5 sm:h-6 bg-gray-200 rounded w-1/2 mb-1"></div>
+                <div className="h-2 sm:h-3 bg-gray-200 rounded w-2/3"></div>
               </div>
             </div>
           </div>
@@ -133,17 +133,17 @@ export default function DashboardStats() {
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
       {statCards.map((card, index) => (
-        <div key={index} className="bg-white p-6 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
-          <div className="flex items-center gap-4">
-            <div className={`w-12 h-12 ${card.bgColor} rounded-lg flex items-center justify-center`}>
-              <card.icon className={`w-6 h-6 ${card.textColor}`} />
+        <div key={index} className="bg-white p-3 sm:p-4 rounded-lg shadow-sm border hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className={`w-10 h-10 sm:w-12 sm:h-12 ${card.bgColor} rounded-lg flex items-center justify-center flex-shrink-0`}>
+              <card.icon className={`w-5 h-5 sm:w-6 sm:h-6 ${card.textColor}`} />
             </div>
-            <div className="flex-1">
-              <p className="text-sm font-medium text-gray-600">{card.title}</p>
-              <p className="text-2xl font-bold text-gray-900 mt-1">{card.value}</p>
-              <p className="text-xs text-gray-500 mt-1">{card.subtitle}</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs sm:text-sm font-medium text-gray-600 truncate">{card.title}</p>
+              <p className="text-lg sm:text-2xl font-bold text-gray-900 mt-1">{card.value}</p>
+              <p className="text-xs text-gray-500 mt-1 truncate">{card.subtitle}</p>
             </div>
           </div>
         </div>
@@ -151,11 +151,11 @@ export default function DashboardStats() {
 
       {/* Alert Card if there are pending issues */}
       {stats.pendingIssues > 0 && (
-        <div className="md:col-span-2 lg:col-span-4">
-          <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg">
+        <div className="sm:col-span-2 lg:col-span-4">
+          <div className="bg-yellow-50 border border-yellow-200 p-3 sm:p-4 rounded-lg">
             <div className="flex items-center gap-3">
-              <AlertTriangle className="w-5 h-5 text-yellow-600" />
-              <div>
+              <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0" />
+              <div className="min-w-0">
                 <h3 className="text-sm font-medium text-yellow-800">
                   Atención Requerida
                 </h3>

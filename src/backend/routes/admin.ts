@@ -206,6 +206,26 @@ router.put('/tickets/:id/lost',
 );
 
 /**
+ * PUT /api/admin/tickets/:id/void
+ * Void a ticket (cancel without charge)
+ * Requires: ADMIN role
+ */
+router.put('/tickets/:id/void',
+  requireRole('admin'),
+  (req, res) => adminController.voidTicket(req, res)
+);
+
+/**
+ * DELETE /api/admin/tickets/:id
+ * Delete a ticket permanently from the system
+ * Requires: ADMIN role
+ */
+router.delete('/tickets/:id',
+  requireRole('admin'),
+  (req, res) => adminController.deleteTicket(req, res)
+);
+
+/**
  * GET /api/admin/transactions/recent
  * Get recent transactions for dashboard
  * Requires: ADMIN role

@@ -92,7 +92,7 @@ export default function HardwareControlPanel() {
 
   useEffect(() => {
     fetchHardwareStatus();
-    const interval = setInterval(fetchHardwareStatus, 5000); // Update every 5 seconds
+    const interval = setInterval(fetchHardwareStatus, 5 * 60 * 1000); // Much less aggressive polling - every 5 minutes
     return () => clearInterval(interval);
   }, []);
 

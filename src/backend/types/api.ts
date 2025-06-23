@@ -89,7 +89,32 @@ export const PaymentRequestSchema = z.object({
   operatorId: z.string().default('OPERATOR_001'), // Default for operator workstation
   paymentMethod: z.enum(['efectivo']).default('efectivo')
 });
-
+             
+             // Lost ticket endpoint schema (plate-based, no ticket number required)
+             export const LostTicketRequestSchema = z.object({
+               plateNumber: z.string()
+                 .min(1, createMessage('validation.plate_required'))
+                 .max(20, createMessage('validation.plate_too_long'))
+                 .regex(/^[A-Z0-9-]+$/, createMessage('validation.plate_invalid_format')),
+               cashReceived: MoneyAmountSchema,
+               operatorId: z.string().default('OPERATOR_001') // Default for operator workstation
+             });
+             
+             export const LostTicketResponseSchema = z.object({
+               success: z.literal(true),
+               data: z.object({
+                 ticketNumber: z.string(),
+                 plateNumber: z.string(),
+                 penalty: z.string(), // Formatted monetary amount
+                 cashReceived: z.string(), // Formatted monetary amount
+                 changeGiven: z.string(), // Formatted monetary amount
+                 paymentTime: z.string(),
+                 message: z.string(),
+                 entryTime: z.string().optional(), // May not be available for lost tickets
+                 exitTime: z.string().optional()
+               }),
+               timestamp: z.string()
+             });
 export const PaymentResponseSchema = z.object({
   success: z.literal(true),
   data: z.object({
@@ -149,6 +174,9 @@ export type EntryResponse = z.infer<typeof EntryResponseSchema>;
 export type CalculateRequest = z.infer<typeof CalculateRequestSchema>;
 export type CalculateResponse = z.infer<typeof CalculateResponseSchema>;
 export type PaymentRequest = z.infer<typeof PaymentRequestSchema>;
+
+export type LostTicketRequest = z.infer<typeof LostTicketRequestSchema>;
+export type LostTicketResponse = z.infer<typeof LostTicketResponseSchema>;
 export type PaymentResponse = z.infer<typeof PaymentResponseSchema>;
 export type ExitRequest = z.infer<typeof ExitRequestSchema>;
 export type ExitResponse = z.infer<typeof ExitResponseSchema>;

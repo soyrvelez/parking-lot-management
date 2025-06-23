@@ -14,6 +14,7 @@ import { AuthenticatedRequest } from '../middleware/auth';
 import { BarcodeScannerService } from '../services/scanner/barcode-scanner.service';
 import { ThermalPrinterService } from '../services/printer/thermal-printer.service';
 import { formatDailyReportCsv, formatMonthlyReportCsv, sanitizeFilename } from '../utils/csvExporter';
+import { generateSummaryReportPdf, generateTransactionHistoryPdf, generateDetailedReportPdf, sanitizePdfFilename } from '../utils/pdfExporter';
 import { auditService } from '../services/audit/audit.service';
 import bcrypt from 'bcrypt';
 import { z } from 'zod';
@@ -1979,6 +1980,216 @@ export class AdminController {
   }
 
   /**
+   * PUT /api/admin/tickets/:id/void
+   * Void a ticket (cancel without any charges)
+   */
+  async voidTicket(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { reason } = req.body;
+
+      // Verify ticket exists and is active
+      const ticket = await prisma.ticket.findUnique({
+        where: { id }
+      });
+
+      if (!ticket) {
+        res.status(404).json({
+          success: false,
+          error: {
+            code: 'TICKET_NOT_FOUND',
+            message: 'Boleto no encontrado',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      if (ticket.status !== 'ACTIVE') {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_TICKET_STATE',
+            message: `No se puede anular un boleto con estado: ${ticket.status}`,
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      const currentTime = new Date();
+
+      // Update ticket to CANCELLED status with audit trail
+      const [updatedTicket, auditLog] = await prisma.$transaction([
+        prisma.ticket.update({
+          where: { id },
+          data: {
+            status: 'CANCELLED',
+            exitTime: currentTime,
+            notes: reason || 'Anulado por administrador',
+            totalAmount: 0 // No charge for voided tickets
+          }
+        }),
+        prisma.auditLog.create({
+          data: {
+            entityId: id,
+            entityType: 'ticket',
+            action: 'VOID_TICKET',
+            performedBy: `${req.user?.name || 'Admin'} (${req.user?.id || 'ADMIN'})`,
+            oldValue: { status: ticket.status },
+            newValue: { status: 'CANCELLED', reason },
+            ipAddress: req.ip || 'unknown',
+            userAgent: req.get('user-agent') || 'unknown',
+            ticketId: id
+          }
+        })
+      ]);
+
+      // Log audit event
+      await auditService.logFromRequest(
+        req,
+        'TICKET',
+        id,
+        'VOID_TICKET',
+        { status: ticket.status },
+        { status: 'CANCELLED' },
+        { reason, plateNumber: ticket.plateNumber }
+      );
+
+      res.json({
+        success: true,
+        data: {
+          ticket: updatedTicket,
+          message: 'Boleto anulado exitosamente'
+        }
+      });
+
+    } catch (error) {
+      console.error('Error voiding ticket:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'VOID_TICKET_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * DELETE /api/admin/tickets/:id
+   * Permanently delete a ticket from the system
+   */
+  async deleteTicket(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const { reason } = req.body;
+
+      // Verify ticket exists
+      const ticket = await prisma.ticket.findUnique({
+        where: { id },
+        include: {
+          transactions: true
+        }
+      });
+
+      if (!ticket) {
+        res.status(404).json({
+          success: false,
+          error: {
+            code: 'TICKET_NOT_FOUND',
+            message: 'Boleto no encontrado',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // Prevent deletion if ticket has transactions
+      if (ticket.transactions.length > 0) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'TICKET_HAS_TRANSACTIONS',
+            message: 'No se puede eliminar un boleto con transacciones asociadas',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // Only allow deletion of active or cancelled tickets
+      if (ticket.status !== 'ACTIVE' && ticket.status !== 'CANCELLED') {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_TICKET_STATE',
+            message: `No se puede eliminar un boleto con estado: ${ticket.status}`,
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // Create audit log before deletion
+      await prisma.auditLog.create({
+        data: {
+          entityId: id,
+          entityType: 'ticket',
+          action: 'DELETE_TICKET',
+          performedBy: `${req.user?.name || 'Admin'} (${req.user?.id || 'ADMIN'})`,
+          oldValue: {
+            id: ticket.id,
+            plateNumber: ticket.plateNumber,
+            status: ticket.status,
+            entryTime: ticket.entryTime,
+            barcode: ticket.barcode
+          },
+          newValue: { deleted: true, reason },
+          ipAddress: req.ip || 'unknown',
+          userAgent: req.get('user-agent') || 'unknown'
+        }
+      });
+
+      // Delete the ticket
+      await prisma.ticket.delete({
+        where: { id }
+      });
+
+      // Log audit event
+      await auditService.logFromRequest(
+        req,
+        'TICKET',
+        id,
+        'DELETE_TICKET',
+        ticket,
+        null,
+        { reason, plateNumber: ticket.plateNumber }
+      );
+
+      res.json({
+        success: true,
+        data: {
+          message: 'Boleto eliminado permanentemente del sistema',
+          deletedTicketId: id
+        }
+      });
+
+    } catch (error) {
+      console.error('Error deleting ticket:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'DELETE_TICKET_ERROR',
+          message: i18n.t('system.internal_error'),
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
    * GET /api/admin/config/pricing
    * Get current pricing configuration
    */
@@ -2369,17 +2580,15 @@ export class AdminController {
         return;
       }
 
-      // For now, only CSV export is supported
+      // Handle PDF exports
       if (exportType === 'pdf') {
-        res.status(501).json({
-          success: false,
-          error: {
-            code: 'PDF_NOT_IMPLEMENTED',
-            message: 'La exportación a PDF aún no está implementada. Use CSV por el momento.',
-            timestamp: new Date().toISOString()
-          }
+        return this.handlePdfExport(req, res, { 
+          startDate, 
+          endDate, 
+          reportScope, 
+          reportType, 
+          transactionType 
         });
-        return;
       }
 
       // For CSV exports, redirect to existing daily report functionality
@@ -2410,6 +2619,441 @@ export class AdminController {
           timestamp: new Date().toISOString()
         }
       });
+    }
+  }
+
+  /**
+   * Handle PDF export requests
+   */
+  private async handlePdfExport(
+    req: AuthenticatedRequest, 
+    res: Response, 
+    params: {
+      startDate: string;
+      endDate: string;
+      reportScope: string;
+      reportType?: string;
+      transactionType?: string;
+    }
+  ): Promise<void> {
+    try {
+      const { startDate, endDate, reportScope, reportType, transactionType } = params;
+      const user = req.user;
+
+      // Generate filename
+      const dateStr = startDate === endDate ? startDate : `${startDate}_${endDate}`;
+      const filename = sanitizePdfFilename(`reporte-${reportScope}-${dateStr}.pdf`);
+
+      // Company info for branding
+      const companyInfo = {
+        name: 'Sistema de Estacionamiento',
+        address: 'Dirección del Estacionamiento',
+        phone: '+52 55 1234 5678',
+        email: 'info@estacionamiento.com'
+      };
+
+      let pdfBuffer: Buffer;
+
+      if (reportScope === 'summary') {
+        // Get summary report data
+        const summaryData = await this.getReportSummaryData(startDate, endDate);
+        
+        pdfBuffer = await generateSummaryReportPdf(summaryData, {
+          title: 'Reporte de Resumen Financiero',
+          subtitle: 'Análisis de Ingresos y Operaciones',
+          period: startDate === endDate ? startDate : `${startDate} - ${endDate}`,
+          generatedBy: user?.name || 'Sistema',
+          company: companyInfo
+        });
+
+      } else if (reportScope === 'transactions') {
+        // Get transaction history data
+        const transactionData = await this.getTransactionHistoryData(startDate, endDate, transactionType);
+        
+        pdfBuffer = await generateTransactionHistoryPdf(transactionData, {
+          title: 'Historial de Transacciones',
+          subtitle: transactionType ? `Tipo: ${transactionType}` : 'Todas las Transacciones',
+          period: startDate === endDate ? startDate : `${startDate} - ${endDate}`,
+          generatedBy: user?.name || 'Sistema',
+          company: companyInfo
+        });
+
+      } else if (reportScope === 'detailed') {
+        // Get detailed report data (combines summary + transactions + statistics)
+        const detailedData = await this.getDetailedReportData(startDate, endDate);
+        
+        pdfBuffer = await generateDetailedReportPdf(detailedData, {
+          title: 'Reporte Detallado de Operaciones',
+          subtitle: 'Análisis Completo del Estacionamiento',
+          period: startDate === endDate ? startDate : `${startDate} - ${endDate}`,
+          generatedBy: user?.name || 'Sistema',
+          company: companyInfo
+        });
+
+      } else {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'UNSUPPORTED_REPORT_SCOPE',
+            message: `Tipo de reporte '${reportScope}' no soportado para PDF.`,
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // Log the export
+      await auditService.logFromRequest(
+        req,
+        'REPORT',
+        `${reportScope}-${dateStr}`,
+        'EXPORT_PDF_REPORT',
+        undefined,
+        undefined,
+        { reportScope, startDate, endDate, filename }
+      );
+
+      // Set response headers for PDF download
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', pdfBuffer.length);
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+
+      // Send PDF buffer
+      res.send(pdfBuffer);
+
+    } catch (error) {
+      console.error('Error generating PDF export:', error);
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'PDF_GENERATION_ERROR',
+          message: 'Error al generar el reporte PDF.',
+          timestamp: new Date().toISOString()
+        }
+      });
+    }
+  }
+
+  /**
+   * Get summary report data for PDF generation
+   */
+  private async getReportSummaryData(startDate: string, endDate: string): Promise<any> {
+    const startDateTime = new Date(startDate + 'T00:00:00.000Z');
+    const endDateTime = new Date(endDate + 'T23:59:59.999Z');
+
+    // Use fresh prisma client instance to avoid scope issues
+    const prismaClient = new PrismaClient();
+
+    try {
+      // Get financial summary
+      const transactions = await prismaClient.transaction.findMany({
+      where: {
+        timestamp: {
+          gte: startDateTime,
+          lte: endDateTime
+        }
+      },
+      include: {
+        ticket: true
+      }
+    });
+
+    const totalRevenue = transactions
+      .reduce((sum, t) => sum + (parseFloat(t.amount.toString()) || 0), 0);
+
+    const totalTransactions = transactions.length;
+    const averageTicketValue = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
+
+    // Get hourly distribution
+    const hourlyData = new Map<number, number>();
+    transactions.forEach(transaction => {
+      const hour = new Date(transaction.timestamp).getHours();
+      hourlyData.set(hour, (hourlyData.get(hour) || 0) + 1);
+    });
+
+    const peakHours = Array.from(hourlyData.entries())
+      .map(([hour, count]) => ({ hour: hour.toString(), count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+
+    // Get transaction type breakdown
+    const typeBreakdown = new Map<string, { count: number; revenue: number }>();
+    transactions.forEach(transaction => {
+      const type = transaction.type;
+      const current = typeBreakdown.get(type) || { count: 0, revenue: 0 };
+      typeBreakdown.set(type, {
+        count: current.count + 1,
+        revenue: current.revenue + (parseFloat(transaction.amount.toString()) || 0)
+      });
+    });
+
+    const transactionChart = Array.from(typeBreakdown.entries()).map(([type, data]) => ({
+      type,
+      count: data.count,
+      revenue: `$${data.revenue.toFixed(2)}`
+    }));
+
+      return {
+        totalRevenue: `$${totalRevenue.toFixed(2)}`,
+        totalTransactions,
+        averageTicketValue: `$${averageTicketValue.toFixed(2)}`,
+        peakHours,
+        transactionChart
+      };
+    } finally {
+      await prismaClient.$disconnect();
+    }
+  }
+
+  /**
+   * Get transaction history data for PDF generation
+   */
+  private async getTransactionHistoryData(startDate: string, endDate: string, transactionType?: string): Promise<any> {
+    const startDateTime = new Date(startDate + 'T00:00:00.000Z');
+    const endDateTime = new Date(endDate + 'T23:59:59.999Z');
+
+    // Use fresh prisma client instance to avoid scope issues
+    const prismaClient = new PrismaClient();
+
+    try {
+      const whereClause: any = {
+        timestamp: {
+          gte: startDateTime,
+          lte: endDateTime
+        }
+      };
+
+      if (transactionType && transactionType !== 'all') {
+        whereClause.type = transactionType;
+      }
+
+      const transactions = await prismaClient.transaction.findMany({
+      where: whereClause,
+      include: {
+        ticket: true
+      },
+      orderBy: {
+        timestamp: 'desc'
+      }
+    });
+
+    const totalRevenue = transactions
+      .reduce((sum, t) => sum + (parseFloat(t.amount.toString()) || 0), 0);
+
+    const processedTransactions = transactions.map(transaction => ({
+      timestamp: transaction.timestamp,
+      type: transaction.type,
+      plateNumber: transaction.ticket?.plateNumber || 'N/A',
+      amount: `$${parseFloat(transaction.amount.toString()).toFixed(2)}`,
+      status: 'COMPLETADO'
+    }));
+
+      return {
+        summary: {
+          totalCount: transactions.length,
+          totalRevenue: `$${totalRevenue.toFixed(2)}`
+        },
+        transactions: processedTransactions
+      };
+    } finally {
+      await prismaClient.$disconnect();
+    }
+  }
+
+  /**
+   * Get detailed report data for PDF generation
+   * Combines summary, transactions, and statistics
+   */
+  private async getDetailedReportData(startDate: string, endDate: string): Promise<any> {
+    const startDateTime = new Date(startDate + 'T00:00:00.000Z');
+    const endDateTime = new Date(endDate + 'T23:59:59.999Z');
+
+    // Use fresh prisma client instance to avoid scope issues
+    const prismaClient = new PrismaClient();
+
+    try {
+      // Get all transactions for the period
+      const transactions = await prismaClient.transaction.findMany({
+        where: {
+          timestamp: {
+            gte: startDateTime,
+            lte: endDateTime
+          }
+        },
+        include: {
+          ticket: true
+        },
+        orderBy: {
+          timestamp: 'desc'
+        }
+      });
+
+      // Calculate summary statistics
+      const totalRevenue = transactions
+        .reduce((sum, t) => sum + (parseFloat(t.amount.toString()) || 0), 0);
+
+      const totalTransactions = transactions.length;
+      const averageTicketValue = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
+
+      // Get revenue by type
+      const revenueByType = new Map<string, { count: number; revenue: number }>();
+      transactions.forEach(transaction => {
+        const type = transaction.type;
+        const current = revenueByType.get(type) || { count: 0, revenue: 0 };
+        revenueByType.set(type, {
+          count: current.count + 1,
+          revenue: current.revenue + (parseFloat(transaction.amount.toString()) || 0)
+        });
+      });
+
+      const revenueByTypeArray = Array.from(revenueByType.entries()).map(([type, data]) => ({
+        type,
+        count: data.count,
+        revenue: `$${data.revenue.toFixed(2)}`,
+        percentage: totalRevenue > 0 ? (data.revenue / totalRevenue) * 100 : 0
+      }));
+
+      // Get hourly breakdown
+      const hourlyData = new Map<number, { entries: number; exits: number; revenue: number }>();
+      
+      // Get all tickets for entry/exit analysis
+      const tickets = await prismaClient.ticket.findMany({
+        where: {
+          OR: [
+            {
+              entryTime: {
+                gte: startDateTime,
+                lte: endDateTime
+              }
+            },
+            {
+              exitTime: {
+                gte: startDateTime,
+                lte: endDateTime
+              }
+            }
+          ]
+        }
+      });
+
+      // Process hourly data
+      tickets.forEach(ticket => {
+        if (ticket.entryTime >= startDateTime && ticket.entryTime <= endDateTime) {
+          const hour = ticket.entryTime.getHours();
+          const current = hourlyData.get(hour) || { entries: 0, exits: 0, revenue: 0 };
+          current.entries++;
+          hourlyData.set(hour, current);
+        }
+        
+        if (ticket.exitTime && ticket.exitTime >= startDateTime && ticket.exitTime <= endDateTime) {
+          const hour = ticket.exitTime.getHours();
+          const current = hourlyData.get(hour) || { entries: 0, exits: 0, revenue: 0 };
+          current.exits++;
+          hourlyData.set(hour, current);
+        }
+      });
+
+      // Add revenue to hourly data
+      transactions.forEach(transaction => {
+        const hour = new Date(transaction.timestamp).getHours();
+        const current = hourlyData.get(hour) || { entries: 0, exits: 0, revenue: 0 };
+        current.revenue += parseFloat(transaction.amount.toString()) || 0;
+        hourlyData.set(hour, current);
+      });
+
+      const hourlyBreakdown = Array.from(hourlyData.entries())
+        .map(([hour, data]) => ({
+          hour,
+          entries: data.entries,
+          exits: data.exits,
+          revenue: `$${data.revenue.toFixed(2)}`
+        }))
+        .sort((a, b) => a.hour - b.hour);
+
+      // Get recent transactions with duration calculation
+      const recentTransactions = transactions.slice(0, 50).map(transaction => {
+        let duration = 'N/A';
+        if (transaction.ticket && transaction.ticket.entryTime && transaction.ticket.exitTime) {
+          const durationMs = transaction.ticket.exitTime.getTime() - transaction.ticket.entryTime.getTime();
+          const hours = Math.floor(durationMs / (1000 * 60 * 60));
+          const minutes = Math.floor((durationMs % (1000 * 60 * 60)) / (1000 * 60));
+          duration = `${hours}h ${minutes}m`;
+        }
+
+        return {
+          timestamp: transaction.timestamp,
+          type: transaction.type,
+          plateNumber: transaction.ticket?.plateNumber || 'N/A',
+          duration,
+          amount: `$${parseFloat(transaction.amount.toString()).toFixed(2)}`
+        };
+      });
+
+      // Calculate additional statistics
+      const lostTickets = await prismaClient.ticket.count({
+        where: {
+          status: 'LOST',
+          paidAt: {
+            gte: startDateTime,
+            lte: endDateTime
+          }
+        }
+      });
+
+      const activePensions = await prismaClient.pensionCustomer.count({
+        where: {
+          isActive: true
+        }
+      });
+
+      // Calculate average stay time for completed tickets
+      const completedTickets = tickets.filter(t => t.exitTime && t.status === 'PAID');
+      let averageStayTime = 'N/A';
+      if (completedTickets.length > 0) {
+        const totalStayMs = completedTickets.reduce((sum, ticket) => {
+          if (ticket.exitTime) {
+            return sum + (ticket.exitTime.getTime() - ticket.entryTime.getTime());
+          }
+          return sum;
+        }, 0);
+        const avgMs = totalStayMs / completedTickets.length;
+        const avgHours = Math.floor(avgMs / (1000 * 60 * 60));
+        const avgMinutes = Math.floor((avgMs % (1000 * 60 * 60)) / (1000 * 60));
+        averageStayTime = `${avgHours}h ${avgMinutes}m`;
+      }
+
+      // Find peak hour
+      const peakHour = hourlyBreakdown.reduce((peak, current) => {
+        return current.entries > peak.entries ? current : peak;
+      }, { hour: 0, entries: 0, exits: 0, revenue: '$0.00' });
+
+      // Get current occupancy
+      const currentOccupancy = await prismaClient.ticket.count({
+        where: {
+          status: 'ACTIVE'
+        }
+      });
+
+      return {
+        totalRevenue: `$${totalRevenue.toFixed(2)}`,
+        totalTransactions,
+        averageTicketValue: `$${averageTicketValue.toFixed(2)}`,
+        peakOccupancy: `${Math.round((currentOccupancy / 100) * 100)}%`, // Assuming 100 spaces
+        revenueByType: revenueByTypeArray,
+        hourlyBreakdown,
+        recentTransactions,
+        statistics: {
+          averageStayTime,
+          peakHour: `${peakHour.hour}:00`,
+          lostTickets,
+          activePensions
+        }
+      };
+
+    } finally {
+      await prismaClient.$disconnect();
     }
   }
 }

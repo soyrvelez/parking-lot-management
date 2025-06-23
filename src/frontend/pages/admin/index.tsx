@@ -60,11 +60,11 @@ export default function AdminDashboard() {
 
   return (
     <AdminLayout>
-      <div className="space-y-6">
+      <div className="space-y-4">
         {/* Header */}
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Dashboard Principal</h1>
-          <p className="text-gray-600 mt-2">
+        <div className="mb-4">
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard Principal</h1>
+          <p className="text-gray-600 text-sm mt-1">
             Monitoreo en tiempo real del sistema de estacionamiento
           </p>
         </div>
@@ -73,25 +73,25 @@ export default function AdminDashboard() {
         <DashboardStats />
 
         {/* Main Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          {/* Live Metrics */}
-          <div className="xl:col-span-2">
-            <LiveMetrics />
+        <div className="space-y-4">
+          {/* Top Row - Live Metrics and Hardware Status */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2">
+              <LiveMetrics />
+            </div>
+            <div className="lg:col-span-1">
+              <HardwareStatus />
+            </div>
           </div>
 
-          {/* Hardware Status */}
-          <div>
-            <HardwareStatus />
-          </div>
-
-          {/* Active Tickets */}
-          <div className="lg:col-span-2">
-            <ActiveTickets />
-          </div>
-
-          {/* Recent Transactions */}
-          <div>
-            <RecentTransactions />
+          {/* Bottom Row - Active Tickets and Recent Transactions */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div>
+              <ActiveTickets />
+            </div>
+            <div>
+              <RecentTransactions />
+            </div>
           </div>
         </div>
       </div>

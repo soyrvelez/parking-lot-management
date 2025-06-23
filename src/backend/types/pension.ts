@@ -56,7 +56,7 @@ export const PensionPaymentSchema = z.object({
   
   cashReceived: z.number()
     .positive('Monto recibido debe ser positivo')
-    .max(10000, 'Monto demasiado alto'),
+    .max(50000, 'Monto demasiado alto'),
   
   operatorId: z.string().optional(),
   
@@ -73,7 +73,7 @@ export const PensionRenewalSchema = z.object({
   
   cashReceived: z.number()
     .positive('Monto recibido debe ser positivo')
-    .max(10000, 'Monto demasiado alto'),
+    .max(50000, 'Monto demasiado alto'),
   
   operatorId: z.string().optional(),
   

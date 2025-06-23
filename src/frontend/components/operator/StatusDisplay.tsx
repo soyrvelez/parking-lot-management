@@ -20,7 +20,7 @@ export default function StatusDisplay() {
 
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 30000); // Update every 30 seconds
+    const interval = setInterval(fetchStats, 3 * 60 * 1000); // Less aggressive polling - every 3 minutes
     return () => clearInterval(interval);
   }, []);
 
@@ -79,62 +79,63 @@ export default function StatusDisplay() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-6">
+      <div className="flex flex-col lg:flex-row items-start lg:items-center gap-3 sm:gap-4 lg:gap-6">
         <div className="animate-pulse flex items-center gap-2">
-          <div className="h-4 w-4 bg-gray-200 rounded"></div>
-          <div className="h-4 bg-gray-200 rounded w-16"></div>
-          <div className="h-4 bg-gray-200 rounded w-20"></div>
+          <div className="h-3 w-3 sm:h-4 sm:w-4 bg-gray-200 rounded"></div>
+          <div className="h-3 sm:h-4 bg-gray-200 rounded w-12 sm:w-16"></div>
+          <div className="h-3 sm:h-4 bg-gray-200 rounded w-16 sm:w-20"></div>
         </div>
-        <div className="flex items-center gap-4">
-          <div className="animate-pulse h-8 bg-gray-200 rounded-lg w-24"></div>
-          <div className="animate-pulse h-8 bg-gray-200 rounded-lg w-28"></div>
-          <div className="animate-pulse h-8 bg-gray-200 rounded-lg w-32"></div>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3 lg:gap-4 w-full">
+          <div className="animate-pulse h-8 sm:h-10 bg-gray-200 rounded-lg w-full sm:w-24 lg:w-28"></div>
+          <div className="animate-pulse h-8 sm:h-10 bg-gray-200 rounded-lg w-full sm:w-28 lg:w-32"></div>
+          <div className="animate-pulse h-8 sm:h-10 bg-gray-200 rounded-lg w-full sm:w-32 lg:w-36"></div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex items-center gap-6">
+    <div className="flex flex-col lg:flex-row items-start lg:items-center gap-3 sm:gap-4 lg:gap-6">
       {/* System Status Indicator */}
-      <div className="flex items-center gap-2">
-        <Activity className="w-4 h-4 text-primary-600" />
-        <span className="text-sm text-gray-600">Sistema:</span>
-        <span className={`text-sm font-medium ${getStatusColor(stats.systemStatus)}`}>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <Activity className="w-3 h-3 sm:w-4 sm:h-4 text-primary-600" />
+        <span className="text-xs sm:text-sm text-gray-600">Sistema:</span>
+        <span className={`text-xs sm:text-sm font-medium ${getStatusColor(stats.systemStatus)}`}>
           {getStatusText(stats.systemStatus)}
         </span>
       </div>
 
-      {/* Horizontal Stats Cards */}
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 bg-blue-50 px-3 py-2 rounded-lg">
-          <Car className="w-4 h-4 text-blue-600" />
-          <div className="flex items-center gap-1">
-            <span className="text-sm text-blue-800">Activos:</span>
-            <span className="text-lg font-bold text-blue-900">{stats.activeTickets}</span>
+      {/* Stats Cards Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 lg:flex lg:items-center gap-2 sm:gap-3 lg:gap-4 w-full lg:w-auto">
+        <div className="flex items-center gap-2 sm:gap-3 bg-blue-50 px-2 py-2 sm:px-3 sm:py-2 rounded-lg touch-manipulation">
+          <Car className="w-4 h-4 sm:w-5 sm:h-5 text-blue-600 flex-shrink-0" />
+          <div className="flex flex-col sm:flex-row sm:items-center gap-0 sm:gap-1 min-w-0">
+            <span className="text-xs sm:text-sm text-blue-800">Activos:</span>
+            <span className="text-lg sm:text-xl lg:text-lg font-bold text-blue-900">{stats.activeTickets}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-green-50 px-3 py-2 rounded-lg">
-          <DollarSign className="w-4 h-4 text-green-600" />
-          <div className="flex items-center gap-1">
-            <span className="text-sm text-green-800">Hoy:</span>
-            <span className="text-sm font-bold text-green-900">{formatCurrency(stats.todayRevenue)}</span>
+        <div className="flex items-center gap-2 sm:gap-3 bg-green-50 px-2 py-2 sm:px-3 sm:py-2 rounded-lg touch-manipulation">
+          <DollarSign className="w-4 h-4 sm:w-5 sm:h-5 text-green-600 flex-shrink-0" />
+          <div className="flex flex-col sm:flex-row sm:items-center gap-0 sm:gap-1 min-w-0">
+            <span className="text-xs sm:text-sm text-green-800">Hoy:</span>
+            <span className="text-sm sm:text-base lg:text-sm font-bold text-green-900 truncate">{formatCurrency(stats.todayRevenue)}</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-lg">
-          <Clock className="w-4 h-4 text-purple-600" />
-          <div className="flex items-center gap-1">
-            <span className="text-sm text-purple-800">Promedio:</span>
-            <span className="text-sm font-bold text-purple-900">{stats.averageStay}</span>
+        <div className="flex items-center gap-2 sm:gap-3 bg-purple-50 px-2 py-2 sm:px-3 sm:py-2 rounded-lg touch-manipulation">
+          <Clock className="w-4 h-4 sm:w-5 sm:h-5 text-purple-600 flex-shrink-0" />
+          <div className="flex flex-col sm:flex-row sm:items-center gap-0 sm:gap-1 min-w-0">
+            <span className="text-xs sm:text-sm text-purple-800">Promedio:</span>
+            <span className="text-sm sm:text-base lg:text-sm font-bold text-purple-900 truncate">{stats.averageStay}</span>
           </div>
         </div>
       </div>
 
       {/* Last Updated */}
-      <div className="text-xs text-gray-400 ml-auto">
-        Actualizado cada 30s
+      <div className="text-xs text-gray-400 lg:ml-auto self-end lg:self-auto">
+        <span className="hidden sm:inline">Actualizado cada 3min</span>
+        <span className="sm:hidden">Act. 3min</span>
       </div>
     </div>
   );

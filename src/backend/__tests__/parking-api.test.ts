@@ -5,6 +5,10 @@ import { Money } from '../../shared/utils/money';
 
 const prisma = new PrismaClient();
 
+// Test variables
+let testTicketNumber: string;
+let paymentTicketNumber: string;
+
 // Mock hardware services
 jest.mock('../services/scanner/barcode-scanner.service');
 jest.mock('../services/printer/thermal-printer.service');
@@ -56,6 +60,9 @@ describe('Parking API Endpoints', () => {
       expect(response.body.data.ticketNumber).toMatch(/^T-\d{6}$/);
       expect(response.body.data.barcode).toContain('ABC-123');
       expect(response.body.data.message).toContain('exitosamente');
+      
+      // Store ticket number for later tests
+      testTicketNumber = response.body.data.ticketNumber;
     });
 
     it('should reject entry for vehicle already inside', async () => {
@@ -142,8 +149,6 @@ describe('Parking API Endpoints', () => {
   });
 
   describe('POST /api/parking/payment', () => {
-    let paymentTicketNumber: string;
-
     beforeAll(async () => {
       // Create another test ticket for payment
       const entryTime = new Date(Date.now() - 1.5 * 60 * 60 * 1000); // 1.5 hours ago
@@ -251,6 +256,271 @@ describe('Parking API Endpoints', () => {
       expect(response.body.data.activeVehicles).toBeDefined();
       expect(response.body.data.todayRevenue).toBeDefined();
       expect(response.body.data.hardware).toBeDefined();
+    });
+  });
+
+  describe('POST /api/parking/lost-ticket', () => {
+    let testPricingConfig: any;
+
+    beforeAll(async () => {
+      // Create pricing configuration with lost ticket fee
+      testPricingConfig = await prisma.pricingConfig.create({
+        data: {
+          minimumHours: 1.0,
+          minimumRate: 25.00,
+          incrementMinutes: 15,
+          dailySpecialHours: 8.0,
+          dailySpecialRate: 100.00,
+          monthlyRate: 1200.00,
+          lostTicketFee: 50.00, // $50 pesos penalty
+          operatorId: 'OP001'
+        }
+      });
+    });
+
+    afterAll(async () => {
+      if (testPricingConfig) {
+        await prisma.pricingConfig.delete({
+          where: { id: testPricingConfig.id }
+        });
+      }
+    });
+
+    it('should process lost ticket with existing active ticket', async () => {
+      // First create an active ticket
+      const activeTicket = await prisma.ticket.create({
+        data: {
+          plateNumber: 'LOST-001',
+          entryTime: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2 hours ago
+          barcode: 'ACTIVE-001',
+          status: 'ACTIVE',
+          operatorId: 'OP001'
+        }
+      });
+
+      const lostTicketData = {
+        plateNumber: 'LOST-001',
+        cashReceived: '50.00',
+        operatorId: 'OP001'
+      };
+
+      const response = await request(app)
+        .post('/api/parking/lost-ticket')
+        .send(lostTicketData)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.plateNumber).toBe('LOST-001');
+      expect(response.body.data.penalty).toBe('$50 pesos');
+      expect(response.body.data.cashReceived).toBe('$50 pesos');
+      expect(response.body.data.changeGiven).toBe('$0 pesos');
+      expect(response.body.data.message).toContain('procesado');
+      expect(response.body.data.paymentTime).toBeDefined();
+
+      // Verify ticket was marked as LOST
+      const updatedTicket = await prisma.ticket.findUnique({
+        where: { id: activeTicket.id }
+      });
+      expect(updatedTicket?.status).toBe('LOST');
+      expect(updatedTicket?.totalAmount).toBe(50.00);
+      expect(updatedTicket?.paidAt).toBeDefined();
+
+      // Verify transaction was created
+      const transaction = await prisma.transaction.findFirst({
+        where: { ticketId: activeTicket.id, type: 'LOST_TICKET' }
+      });
+      expect(transaction).toBeDefined();
+      expect(transaction?.amount).toBe(50.00);
+    });
+
+    it('should process lost ticket with no existing ticket', async () => {
+      const lostTicketData = {
+        plateNumber: 'LOST-999',
+        cashReceived: '50.00',
+        operatorId: 'OP001'
+      };
+
+      const response = await request(app)
+        .post('/api/parking/lost-ticket')
+        .send(lostTicketData)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.plateNumber).toBe('LOST-999');
+      expect(response.body.data.penalty).toBe('$50 pesos');
+      expect(response.body.data.cashReceived).toBe('$50 pesos');
+      expect(response.body.data.changeGiven).toBe('$0 pesos');
+      expect(response.body.data.message).toContain('procesado');
+
+      // Verify lost ticket record was created
+      const lostTicket = await prisma.ticket.findFirst({
+        where: { plateNumber: 'LOST-999', status: 'LOST' }
+      });
+      expect(lostTicket).toBeDefined();
+      expect(lostTicket?.totalAmount).toBe(50.00);
+      expect(lostTicket?.barcode).toContain('LOST-LOST-999');
+
+      // Verify transaction was created
+      const transaction = await prisma.transaction.findFirst({
+        where: { ticketId: lostTicket?.id, type: 'LOST_TICKET' }
+      });
+      expect(transaction).toBeDefined();
+      expect(transaction?.amount).toBe(50.00);
+    });
+
+    it('should calculate correct change when overpaid', async () => {
+      const lostTicketData = {
+        plateNumber: 'LOST-002',  
+        cashReceived: '100.00', // Overpaid by $50
+        operatorId: 'OP001'
+      };
+
+      const response = await request(app)
+        .post('/api/parking/lost-ticket')
+        .send(lostTicketData)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.penalty).toBe('$50 pesos');
+      expect(response.body.data.cashReceived).toBe('$100 pesos');
+      expect(response.body.data.changeGiven).toBe('$50 pesos');
+    });
+
+    it('should return Spanish error for insufficient payment', async () => {
+      const lostTicketData = {
+        plateNumber: 'LOST-003',
+        cashReceived: '25.00', // Less than $50 penalty
+        operatorId: 'OP001'
+      };
+
+      const response = await request(app)
+        .post('/api/parking/lost-ticket')
+        .send(lostTicketData)
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      expect(response.body.error.message).toContain('insuficiente');
+      expect(response.body.error.code).toBe('INSUFFICIENT_PAYMENT');
+    });
+
+    it('should return Spanish error for missing plate number', async () => {
+      const lostTicketData = {
+        cashReceived: '50.00',
+        operatorId: 'OP001'
+      };
+
+      const response = await request(app)
+        .post('/api/parking/lost-ticket')
+        .send(lostTicketData)
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      expect(response.body.error.details.plateNumber).toContain('requerido');
+    });
+
+    it('should return Spanish error for invalid plate format', async () => {
+      const lostTicketData = {
+        plateNumber: 'invalid_plate!@#',
+        cashReceived: '50.00',
+        operatorId: 'OP001'
+      };
+
+      const response = await request(app)
+        .post('/api/parking/lost-ticket')
+        .send(lostTicketData)
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      expect(response.body.error.details.plateNumber).toContain('formato');
+    });
+
+    it('should handle multiple active tickets for same plate', async () => {
+      // Create two active tickets with same plate
+      const ticket1 = await prisma.ticket.create({
+        data: {
+          plateNumber: 'MULTIPLE-001',
+          entryTime: new Date(Date.now() - 3 * 60 * 60 * 1000), // 3 hours ago
+          barcode: 'MULTI-001-A',
+          status: 'ACTIVE',
+          operatorId: 'OP001'
+        }
+      });
+
+      const ticket2 = await prisma.ticket.create({
+        data: {
+          plateNumber: 'MULTIPLE-001',
+          entryTime: new Date(Date.now() - 1 * 60 * 60 * 1000), // 1 hour ago
+          barcode: 'MULTI-001-B',
+          status: 'ACTIVE',
+          operatorId: 'OP001'
+        }
+      });
+
+      const lostTicketData = {
+        plateNumber: 'MULTIPLE-001',
+        cashReceived: '50.00',
+        operatorId: 'OP001'
+      };
+
+      const response = await request(app)
+        .post('/api/parking/lost-ticket')
+        .send(lostTicketData)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.plateNumber).toBe('MULTIPLE-001');
+
+      // Should process the first ticket found (implementation detail)
+      const processedTicket = await prisma.ticket.findFirst({
+        where: { plateNumber: 'MULTIPLE-001', status: 'LOST' }
+      });
+      expect(processedTicket).toBeDefined();
+
+      // Clean up remaining active ticket
+      await prisma.ticket.deleteMany({
+        where: { plateNumber: 'MULTIPLE-001', status: 'ACTIVE' }
+      });
+    });
+
+    it('should reject empty cash amount', async () => {
+      const lostTicketData = {
+        plateNumber: 'LOST-004',
+        cashReceived: '',
+        operatorId: 'OP001'
+      };
+
+      const response = await request(app)
+        .post('/api/parking/lost-ticket')
+        .send(lostTicketData)
+        .expect(400);
+
+      expect(response.body.success).toBe(false);
+      expect(response.body.error.details.cashReceived).toBeDefined();
+    });
+
+    it('should use default operator ID when not provided', async () => {
+      const lostTicketData = {
+        plateNumber: 'LOST-005',
+        cashReceived: '50.00'
+        // operatorId omitted - should default to OPERATOR_001
+      };
+
+      const response = await request(app)
+        .post('/api/parking/lost-ticket')
+        .send(lostTicketData)
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.plateNumber).toBe('LOST-005');
+
+      // Verify default operator ID was used in transaction
+      const lostTicket = await prisma.ticket.findFirst({
+        where: { plateNumber: 'LOST-005', status: 'LOST' }
+      });
+      const transaction = await prisma.transaction.findFirst({
+        where: { ticketId: lostTicket?.id, type: 'LOST_TICKET' }
+      });
+      expect(transaction?.operatorId).toBe('OPERATOR_001');
     });
   });
 

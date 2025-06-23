@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { DollarSign, ArrowLeft, Download, Filter, Calendar, Search } from 'lucide-react';
-import { useAuthenticatedFetch } from '@/hooks/useKeyboardShortcuts';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import Decimal from 'decimal.js';
 
 interface CashRegister {
@@ -32,7 +32,7 @@ export default function CashHistory() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isFetching, setIsFetching] = useState(false);
-  const authenticatedFetch = useAuthenticatedFetch();
+  const { authenticatedFetch } = useAdminAuth();
 
   // Data state
   const [cashHistory, setCashHistory] = useState<CashRegister[]>([]);

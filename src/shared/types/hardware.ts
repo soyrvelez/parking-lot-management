@@ -4,8 +4,14 @@
  */
 
 export interface PrinterConfig {
-  host: string;
-  port: number;
+  // Connection configuration
+  interfaceType: 'tcp' | 'usb';
+  // TCP configuration
+  host?: string;
+  port?: number;
+  // USB configuration
+  devicePath?: string;
+  // Common configuration
   timeout: number;
   retryAttempts: number;
   retryDelay: number;
@@ -42,7 +48,7 @@ export interface PrinterStatus {
 export interface ReceiptData {
   ticketNumber: string;
   plateNumber: string;
-  entryTime: Date;
+  entryTime?: Date;
   exitTime?: Date;
   durationMinutes?: number;
   totalAmount: number;
@@ -50,6 +56,9 @@ export interface ReceiptData {
   change?: number;
   cashReceived?: number; // Amount of cash received
   lostTicketFee?: number; // Fee for lost ticket
+  monthlyRate?: number; // Monthly rate for pension customers
+  startDate?: Date; // Start date for pension period
+  endDate?: Date; // End date for pension period
   type: 'ENTRY' | 'PAYMENT' | 'LOST_TICKET' | 'PENSION';
   customerName?: string; // For pension customers
   validUntil?: Date; // For pension receipts
@@ -104,8 +113,15 @@ export interface HardwareHealth {
 // Constants for hardware configuration
 export const HARDWARE_CONSTANTS = {
   PRINTER: {
+    // TCP Configuration
     DEFAULT_HOST: '192.168.1.100',
     DEFAULT_PORT: 9100,
+    // USB Configuration
+    DEFAULT_USB_DEVICE: '/dev/usb/lp0',
+    ALTERNATIVE_USB_DEVICE: '/dev/ttyUSB0',
+    USB_SYMLINK: '/dev/thermal-printer',
+    // Common Configuration
+    DEFAULT_INTERFACE_TYPE: 'usb' as const,
     DEFAULT_TIMEOUT: 5000,
     DEFAULT_RETRY_ATTEMPTS: 3,
     DEFAULT_RETRY_DELAY: 2000,

@@ -5,6 +5,7 @@
 
 import { EventEmitter } from 'events';
 import { Money } from '../../../shared/utils/money';
+import { generateTransactionId } from '../../../shared/utils/id-generation';
 import { i18n } from '../../../shared/localization';
 
 export interface Ticket {
@@ -212,7 +213,7 @@ export class TicketLookupService extends EventEmitter {
         this.pricingConfig.dailySpecialRate &&
         durationHours >= this.pricingConfig.dailySpecialHours) {
       
-      if (totalAmount.isGreaterThan(this.pricingConfig.dailySpecialRate)) {
+      if (totalAmount.greaterThan(this.pricingConfig.dailySpecialRate)) {
         dailySpecial = this.pricingConfig.dailySpecialRate;
         totalAmount = this.pricingConfig.dailySpecialRate;
       }
@@ -241,15 +242,15 @@ export class TicketLookupService extends EventEmitter {
     const exitTime = new Date();
     const feeCalculation = await this.calculateParkingFee(ticket, exitTime);
     
-    if (amountPaid.isLessThan(feeCalculation.totalAmount)) {
+    if (amountPaid.lessThan(feeCalculation.totalAmount)) {
       throw new Error(i18n.t('payment.insufficient_amount', {
-        required: feeCalculation.totalAmount.toFormattedString(),
-        provided: amountPaid.toFormattedString()
+        required: feeCalculation.totalAmount.formatPesos(),
+        provided: amountPaid.formatPesos()
       }));
     }
 
     const change = amountPaid.subtract(feeCalculation.totalAmount);
-    const transactionId = `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const transactionId = generateTransactionId();
 
     // Update ticket
     ticket.exitTime = exitTime;
@@ -303,18 +304,18 @@ export class TicketLookupService extends EventEmitter {
     amountPaid: Money,
     operatorId?: string
   ): Promise<PaymentResult> {
-    if (amountPaid.isLessThan(this.pricingConfig.lostTicketFee)) {
+    if (amountPaid.lessThan(this.pricingConfig.lostTicketFee)) {
       throw new Error(i18n.t('payment.insufficient_lost_ticket_fee', {
-        required: this.pricingConfig.lostTicketFee.toFormattedString(),
-        provided: amountPaid.toFormattedString()
+        required: this.pricingConfig.lostTicketFee.formatPesos(),
+        provided: amountPaid.formatPesos()
       }));
     }
 
     const change = amountPaid.subtract(this.pricingConfig.lostTicketFee);
-    const transactionId = `LOST-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const transactionId = generateTransactionId();
     const now = new Date();
 
-    // Create lost ticket record
+    // Create lost ticket record with generated ID
     const lostTicket: Ticket = {
       id: transactionId,
       plateNumber: plateNumber.toUpperCase(),

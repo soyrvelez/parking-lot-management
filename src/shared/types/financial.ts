@@ -127,6 +127,7 @@ export interface TranslationKey {
     scanner_ready: string;
     scanner_error: string;
     hardware_check: string;
+    status_check: string;
     connection_failed: string;
     retry_connection: string;
     receipt_printing: string;
@@ -242,6 +243,7 @@ export interface TranslationKey {
     back: string;
     clear: string;
     enter_manually: string;
+    refresh: string;
   };
   
   // Status Messages
@@ -339,6 +341,10 @@ export interface TranslationKey {
     token_invalid: string;
     authentication_failed: string;
     insufficient_permissions: string;
+    invalid_credentials: string;
+    login_successful: string;
+    logout_successful: string;
+    session_expired: string;
   };
   
   // Cash Register Management
@@ -391,6 +397,8 @@ export interface TranslationKey {
     database_healthy: string;
     database_error: string;
     auth_service_healthy: string;
+    hardware_status: string;
+    real_time_monitoring: string;
     operator_created_successfully: string;
     operator_updated_successfully: string;
     operator_not_found: string;
@@ -413,6 +421,7 @@ export interface TranslationKey {
     operator_created: string;
     operator_updated: string;
     lost_ticket_processed: string;
+    lost_ticket_no_original_processed: string;
     system_backup: string;
   };
   

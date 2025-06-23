@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import AdminLayout from '@/components/admin/AdminLayout';
 import { DollarSign, TrendingUp, ArrowUpRight, ArrowDownRight, Calculator, History, AlertCircle, CheckCircle } from 'lucide-react';
-import { useAuthenticatedFetch } from '@/hooks/useKeyboardShortcuts';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import Decimal from 'decimal.js';
 
 interface CashRegisterStatus {
@@ -27,7 +27,7 @@ export default function AdminCash() {
   const router = useRouter();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const authenticatedFetch = useAuthenticatedFetch();
+  const { authenticatedFetch } = useAdminAuth();
 
   // Cash register state
   const [registerStatus, setRegisterStatus] = useState<CashRegisterStatus>({

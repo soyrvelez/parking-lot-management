@@ -10,6 +10,7 @@ interface KeyboardShortcuts {
   onPrintReceipt?: () => void;
   onEscape?: () => void;
   onQuickAmount?: (amount: string) => void;
+  onExactAmount?: () => void;
 }
 
 /**
@@ -43,7 +44,7 @@ export const useKeyboardShortcuts = (shortcuts: KeyboardShortcuts) => {
         
         case 'F4':
           event.preventDefault();
-          shortcuts.onPaymentMode?.();
+          shortcuts.onExactAmount?.() || shortcuts.onPaymentMode?.();
           break;
         
         case 'F5':
@@ -153,7 +154,7 @@ export const useKeyboardShortcuts = (shortcuts: KeyboardShortcuts) => {
                      throw new Error('No authentication token found');
                    }
              
-                   requestHeaders['Authorization'] = `Bearer ${token}`;
+                   (requestHeaders as any)['Authorization'] = `Bearer ${token}`;
                  }
              
                  try {
