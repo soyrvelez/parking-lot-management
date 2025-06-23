@@ -254,15 +254,19 @@ export class AdminController {
         scanner: this.scannerService.getStatus()
       };
 
-      // Get cash register status
-      const openRegister = await prisma.cashRegister.findFirst({
+      // Get cash register status - aggregate all open registers for admin view
+      const openRegisters = await prisma.cashRegister.findMany({
         where: { status: 'OPEN' },
         orderBy: { shiftStart: 'desc' }
       });
 
-      const cashRegisterBalanceValue = openRegister 
-        ? openRegister.currentBalance.toNumber()
-        : 0;
+      // Calculate total balance across all open registers
+      const totalCashRegisterBalance = openRegisters.reduce((total, register) => {
+        return total + register.currentBalance.toNumber();
+      }, 0);
+
+      // Get the most recent register for status display
+      const primaryRegister = openRegisters.length > 0 ? openRegisters[0] : null;
 
       res.json({
         success: true,
@@ -283,9 +287,11 @@ export class AdminController {
                 : i18n.t('admin.no_peak_data')
             },
             cashRegister: {
-              status: openRegister ? 'ABIERTA' : 'CERRADA',
-              balance: this.formatLargeAmount(cashRegisterBalanceValue),
-              operator: openRegister?.operatorId || null
+              status: openRegisters.length > 0 ? 'ABIERTA' : 'CERRADA',
+              balance: this.formatLargeAmount(totalCashRegisterBalance),
+              operator: primaryRegister?.operatorId || null,
+              openRegisters: openRegisters.length,
+              operators: openRegisters.map(r => r.operatorId)
             },
             hardwareStatus: {
               printer: {

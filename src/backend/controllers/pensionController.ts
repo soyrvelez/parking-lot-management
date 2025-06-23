@@ -5,6 +5,7 @@ import { i18n } from '../../shared/localization';
 import { BusinessLogicError, HardwareError } from '../middleware/errorHandler';
 import { auditLogger } from '../middleware/logging';
 import { ThermalPrinterService } from '../services/printer/thermal-printer.service';
+import { withAtomicRetry } from '../../shared/utils/id-generation';
 import {
   CreatePensionCustomerRequest,
   PensionPaymentRequest,
@@ -242,32 +243,77 @@ export class PensionController {
       // Generate pension barcode
       const pensionBarcode = `PENSION-${plateNumber.toUpperCase()}`;
 
-      // Create pension customer
-      const customer = await prisma.pensionCustomer.create({
-        data: {
-          name,
-          phone,
-          plateNumber: plateNumber.toUpperCase(),
-          vehicleMake,
-          vehicleModel,
-          monthlyRate,
-          startDate,
-          endDate,
-          isActive: true
-        }
-      });
+      // Create pension customer with initial payment and cash flow integration
+      let cashRegisterUpdated = false;
+      const customer = await withAtomicRetry(prisma, async (tx) => {
+        // Create pension customer
+        const newCustomer = await tx.pensionCustomer.create({
+          data: {
+            name,
+            phone,
+            plateNumber: plateNumber.toUpperCase(),
+            vehicleMake,
+            vehicleModel,
+            monthlyRate,
+            startDate,
+            endDate,
+            isActive: true
+          }
+        });
 
-      // Create initial payment transaction
-      await prisma.transaction.create({
-        data: {
-          type: 'PENSION',
-          amount: monthlyRate,
-          pensionId: customer.id,
-          description: i18n.t('transaction.pension_payment', { 
-            customerName: customer.name 
-          }),
-          operatorId
+        // Create initial payment transaction
+        await tx.transaction.create({
+          data: {
+            type: 'PENSION',
+            amount: monthlyRate,
+            pensionId: newCustomer.id,
+            description: i18n.t('transaction.pension_payment', { 
+              customerName: newCustomer.name 
+            }),
+            operatorId
+          }
+        });
+
+        // Update cash register balance with initial pension payment
+        const openCashRegister = await tx.cashRegister.findFirst({
+          where: {
+            operatorId,
+            status: 'OPEN'
+          }
+        });
+
+        if (openCashRegister) {
+          // Create cash flow record for the initial pension payment
+          await tx.cashFlow.create({
+            data: {
+              type: 'DEPOSIT',
+              amount: monthlyRate,
+              reason: `Registro pensión - Cliente: ${newCustomer.name} (${newCustomer.plateNumber})`,
+              performedBy: operatorId,
+              cashRegisterId: openCashRegister.id,
+              timestamp: new Date()
+            }
+          });
+
+          // Update cash register balance
+          const currentBalance = new Money(openCashRegister.currentBalance);
+          const paymentAmount = Money.fromNumber(monthlyRate);
+          const newBalance = currentBalance.add(paymentAmount);
+          
+          await tx.cashRegister.update({
+            where: { id: openCashRegister.id },
+            data: {
+              currentBalance: newBalance.toDatabase(),
+              lastUpdated: new Date()
+            }
+          });
+
+          cashRegisterUpdated = true;
+        } else {
+          console.warn(`No open cash register found for operator ${operatorId} - pension registration payment not added to cash flow`);
         }
+
+        return newCustomer;
       });
 
       // Print pension customer card
@@ -296,7 +342,8 @@ export class PensionController {
         monthlyRate: monthlyRate <= 9999.99 
           ? Money.fromNumber(monthlyRate).formatPesos()
           : `$${monthlyRate.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} pesos`,
-        duration: `${durationMonths} meses`
+        duration: `${durationMonths} meses`,
+        cashRegisterUpdated
       });
 
       const customerData = this.formatCustomerResponse(customer);
@@ -367,8 +414,9 @@ export class PensionController {
 
       const changeAmount = cashGiven.subtract(monthlyRate);
 
-      // Process payment in transaction
-      const result = await prisma.$transaction(async (tx) => {
+      // Process payment with cash flow integration
+      let cashRegisterUpdated = false;
+      const result = await withAtomicRetry(prisma, async (tx) => {
         // Create payment transaction
         const transaction = await tx.transaction.create({
           data: {
@@ -381,6 +429,44 @@ export class PensionController {
             operatorId
           }
         });
+
+        // Update cash register balance with pension payment
+        const openCashRegister = await tx.cashRegister.findFirst({
+          where: {
+            operatorId,
+            status: 'OPEN'
+          }
+        });
+
+        if (openCashRegister) {
+          // Create cash flow record for the pension payment
+          await tx.cashFlow.create({
+            data: {
+              type: 'DEPOSIT',
+              amount: monthlyRate.toDatabase(),
+              reason: `Pago pensión - Cliente: ${customer.name} (${customer.plateNumber})`,
+              performedBy: operatorId,
+              cashRegisterId: openCashRegister.id,
+              timestamp: new Date()
+            }
+          });
+
+          // Update cash register balance
+          const currentBalance = new Money(openCashRegister.currentBalance);
+          const newBalance = currentBalance.add(monthlyRate);
+          
+          await tx.cashRegister.update({
+            where: { id: openCashRegister.id },
+            data: {
+              currentBalance: newBalance.toDatabase(),
+              lastUpdated: new Date()
+            }
+          });
+
+          cashRegisterUpdated = true;
+        } else {
+          console.warn(`No open cash register found for operator ${operatorId} - pension payment not added to cash flow`);
+        }
 
         // Extend pension if currently active (add 1 month)
         let updatedCustomer = customer;
@@ -441,7 +527,8 @@ export class PensionController {
         amount: monthlyRate.formatPesos(),
         cashReceived: cashGiven.formatPesos(),
         changeGiven: changeAmount.formatPesos(),
-        validUntil: i18n.formatDate(result.customer.endDate)
+        validUntil: i18n.formatDate(result.customer.endDate),
+        cashRegisterUpdated
       });
 
       const customerData = this.formatCustomerResponse(result.customer);
@@ -454,7 +541,8 @@ export class PensionController {
             amount: monthlyRate.formatPesos(),
             cashReceived: cashGiven.formatPesos(),
             changeGiven: changeAmount.formatPesos(),
-            validUntil: i18n.formatDate(result.customer.endDate)
+            validUntil: i18n.formatDate(result.customer.endDate),
+            cashRegisterUpdated
           }
         },
         message: 'Pago de pensión procesado exitosamente',
@@ -511,8 +599,9 @@ export class PensionController {
 
       const changeAmountValue = cashGivenValue - totalAmountValue;
 
-      // Process renewal
-      const result = await prisma.$transaction(async (tx) => {
+      // Process renewal with cash flow integration
+      let cashRegisterUpdated = false;
+      const result = await withAtomicRetry(prisma, async (tx) => {
         // Create renewal transaction
         const transaction = await tx.transaction.create({
           data: {
@@ -523,6 +612,47 @@ export class PensionController {
             operatorId
           }
         });
+
+        // Update cash register balance with renewal payment
+        const openCashRegister = await tx.cashRegister.findFirst({
+          where: {
+            operatorId,
+            status: 'OPEN'
+          }
+        });
+
+        if (openCashRegister) {
+          // Create cash flow record for the renewal payment
+          await tx.cashFlow.create({
+            data: {
+              type: 'DEPOSIT',
+              amount: totalAmountValue,
+              reason: `Renovación pensión ${durationMonths} meses - Cliente: ${customer.name} (${customer.plateNumber})`,
+              performedBy: operatorId,
+              cashRegisterId: openCashRegister.id,
+              timestamp: new Date()
+            }
+          });
+
+          // Update cash register balance
+          const currentBalance = new Money(openCashRegister.currentBalance);
+          const renewalAmount = totalAmountValue <= 9999.99 
+            ? Money.fromNumber(totalAmountValue)
+            : new Money(totalAmountValue.toString(), false);
+          const newBalance = currentBalance.add(renewalAmount);
+          
+          await tx.cashRegister.update({
+            where: { id: openCashRegister.id },
+            data: {
+              currentBalance: newBalance.toDatabase(),
+              lastUpdated: new Date()
+            }
+          });
+
+          cashRegisterUpdated = true;
+        } else {
+          console.warn(`No open cash register found for operator ${operatorId} - pension renewal payment not added to cash flow`);
+        }
 
         // Extend pension period
         const currentEndDate = customer.isActive && new Date() < customer.endDate 
@@ -549,7 +679,8 @@ export class PensionController {
         customerName: result.customer.name,
         duration: `${durationMonths} meses`,
         amount: this.formatLargeAmount(totalAmountValue),
-        validUntil: i18n.formatDate(result.customer.endDate)
+        validUntil: i18n.formatDate(result.customer.endDate),
+        cashRegisterUpdated
       });
 
       const customerData = this.formatCustomerResponse(result.customer);

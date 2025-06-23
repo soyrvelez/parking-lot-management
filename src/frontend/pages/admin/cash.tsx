@@ -265,7 +265,7 @@ export default function AdminCash() {
         if (result.success && result.data?.registers) {
           // Generate CSV report
           const headers = ['Fecha', 'Tipo', 'Monto', 'Descripción', 'Balance'];
-          const rows = [];
+          const rows: any[][] = [];
           
           result.data.registers.forEach((register: any) => {
             rows.push([

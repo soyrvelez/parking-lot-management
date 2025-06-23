@@ -554,6 +554,7 @@ export class ParkingController {
   
         const changeAmount = cashGiven.subtract(lostTicketFee);
         const exitTime = new Date();
+        let cashRegisterUpdated = false;
   
         if (activeTicket) {
           // Found existing ticket - mark as lost and paid
@@ -581,6 +582,44 @@ export class ParkingController {
                 operatorId
               }
             });
+
+            // Update cash register balance with lost ticket payment
+            const openCashRegister = await tx.cashRegister.findFirst({
+              where: {
+                operatorId,
+                status: 'OPEN'
+              }
+            });
+
+            if (openCashRegister) {
+              // Create cash flow record for the lost ticket payment
+              await tx.cashFlow.create({
+                data: {
+                  type: 'DEPOSIT',
+                  amount: lostTicketFee.toDatabase(),
+                  reason: `Boleto extraviado - Placa: ${activeTicket.plateNumber}`,
+                  performedBy: operatorId,
+                  cashRegisterId: openCashRegister.id,
+                  timestamp: new Date()
+                }
+              });
+
+              // Update cash register balance
+              const currentBalance = new Money(openCashRegister.currentBalance);
+              const newBalance = currentBalance.add(lostTicketFee);
+              
+              await tx.cashRegister.update({
+                where: { id: openCashRegister.id },
+                data: {
+                  currentBalance: newBalance.toDatabase(),
+                  lastUpdated: new Date()
+                }
+              });
+
+              cashRegisterUpdated = true;
+            } else {
+              console.warn(`No open cash register found for operator ${operatorId} - lost ticket payment not added to cash flow`);
+            }
           });
   
           // Log lost ticket processing
@@ -589,12 +628,14 @@ export class ParkingController {
             plateNumber: activeTicket.plateNumber,
             lostTicketFee: lostTicketFee.formatPesos(),
             cashReceived: cashGiven.formatPesos(),
-            changeGiven: changeAmount.formatPesos()
+            changeGiven: changeAmount.formatPesos(),
+            cashRegisterUpdated
           });
   
           res.json({
             success: true,
             data: {
+              transactionId: activeTicket.id,
               ticketNumber: activeTicket.id,
               plateNumber: activeTicket.plateNumber,
               entryTime: i18n.formatDateTime(activeTicket.entryTime),
@@ -603,82 +644,23 @@ export class ParkingController {
               cashReceived: cashGiven.formatPesos(),
               changeGiven: changeAmount.formatPesos(),
               paymentTime: i18n.formatDateTime(new Date()),
+              cashRegisterUpdated,
               message: i18n.t('parking.lost_ticket_processed')
             },
             timestamp: new Date().toISOString()
           });
   
         } else {
-          // No active ticket found - create lost ticket record for audit
-          lostTicket = await withAtomicRetry(prisma, async (tx) => {
-            // Create lost ticket record with auto-generated ID
-            return await tx.ticket.create({
-              data: {
-                plateNumber: plateNumber.toUpperCase(),
-                entryTime: new Date(Date.now() - 4 * 60 * 60 * 1000), // Estimate 4 hours ago
-                exitTime,
-                totalAmount: lostTicketFee.toNumber(),
-                status: 'LOST',
-                barcode: generateBarcode('LOST', plateNumber.toUpperCase()),
-                failureReason: 'No original ticket found - lost ticket fee applied',
-                operatorId
-              }
-            });
-
-            // Create transaction record
-            await tx.transaction.create({
-              data: {
-                type: 'LOST_TICKET',
-                amount: lostTicketFee.toNumber(),
-                ticketId: lostTicket.id,
-                description: i18n.t('transaction.lost_ticket_fee_no_original'),
-                operatorId
-              }
-            });
-
-            return lostTicket;
-          });
-  
-          // Log lost ticket processing without original
-          auditLogger('LOST_TICKET_NO_ORIGINAL', operatorId, {
-            ticketNumber: lostTicket.id,
-            plateNumber: plateNumber.toUpperCase(),
-            lostTicketFee: lostTicketFee.formatPesos(),
-            cashReceived: cashGiven.formatPesos(),
-            changeGiven: changeAmount.formatPesos()
-          });
-  
-          res.json({
-            success: true,
-            data: {
-              ticketNumber: lostTicket.id,
+          // No active ticket found - reject the payment
+          throw new BusinessLogicError(
+            'No se encontró un boleto activo para esta placa. Solo se pueden procesar boletos extraviados para vehículos que ya están en el estacionamiento.',
+            'NO_ACTIVE_TICKET_FOUND',
+            404,
+            { 
               plateNumber: plateNumber.toUpperCase(),
-              penalty: lostTicketFee.formatPesos(),
-              cashReceived: cashGiven.formatPesos(),
-              changeGiven: changeAmount.formatPesos(),
-              paymentTime: i18n.formatDateTime(new Date()),
-              message: i18n.t('parking.lost_ticket_no_original_processed')
-            },
-            timestamp: new Date().toISOString()
-          });
-        }
-  
-        // Try to print lost ticket receipt
-        try {
-          const ticketForPrint = activeTicket || lostTicket;
-          await this.printerService.printLostTicketReceipt({
-            ticketNumber: ticketForPrint.id,
-            plateNumber: plateNumber.toUpperCase(),
-            entryTime: new Date(),
-            lostTicketFee: lostTicketFee.toNumber(),
-            totalAmount: lostTicketFee.toNumber(),
-            cashReceived: cashGiven.toNumber(),
-            change: changeAmount.toNumber(),
-            type: 'LOST_TICKET'
-          });
-        } catch (printError) {
-          console.error('Failed to print lost ticket receipt:', printError);
-          // Don't fail the transaction for print errors
+              suggestion: 'Verifique que el vehículo esté realmente en el estacionamiento y que el número de placa sea correcto.'
+            }
+          );
         }
   
       } catch (error) {
@@ -686,7 +668,67 @@ export class ParkingController {
       }
     }
 
+  async validatePlateForLostTicket(req: Request, res: Response): Promise<void> {
+    const { plateNumber }: { plateNumber: string } = req.body;
+    
+    try {
+      if (!plateNumber || plateNumber.trim().length === 0) {
+        throw new BusinessLogicError(
+          'Número de placa es requerido',
+          'PLATE_NUMBER_REQUIRED',
+          400
+        );
+      }
 
+      // Find active ticket by plate number
+      const activeTicket = await prisma.ticket.findFirst({
+        where: {
+          plateNumber: plateNumber.toUpperCase(),
+          status: 'ACTIVE'
+        }
+      });
+
+      if (!activeTicket) {
+        res.status(404).json({
+          success: false,
+          error: {
+            code: 'NO_ACTIVE_TICKET_FOUND',
+            message: 'No se encontró un boleto activo para esta placa',
+            details: {
+              plateNumber: plateNumber.toUpperCase(),
+              suggestion: 'Verifique que el vehículo esté en el estacionamiento y que el número de placa sea correcto'
+            }
+          },
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+
+      // Get pricing configuration for lost ticket fee
+      const pricing = await prisma.pricingConfig.findFirst({
+        orderBy: { createdAt: 'desc' }
+      });
+
+      const lostTicketFee = pricing ? Money.fromNumber(pricing.lostTicketFee.toNumber()) : Money.fromNumber(150);
+
+      res.json({
+        success: true,
+        message: 'Boleto activo encontrado para la placa especificada',
+        data: {
+          ticketId: activeTicket.id,
+          plateNumber: activeTicket.plateNumber,
+          entryTime: i18n.formatDateTime(activeTicket.entryTime),
+          duration: i18n.formatDuration(new Date().getTime() - activeTicket.entryTime.getTime()),
+          lostTicketFee: lostTicketFee.formatPesos(),
+          lostTicketFeeAmount: lostTicketFee.toNumber()
+        },
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      throw error;
+    }
+  }
 
   async getStatus(req: Request, res: Response): Promise<void> {
     try {

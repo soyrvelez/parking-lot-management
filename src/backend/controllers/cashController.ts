@@ -340,6 +340,73 @@ export class CashController {
         return;
       }
 
+      // For admin users, aggregate all open registers
+      if (operatorId.includes('admin')) {
+        const allOpenRegisters = await prisma.cashRegister.findMany({
+          where: { status: 'OPEN' },
+          include: {
+            cashFlows: {
+              orderBy: { timestamp: 'desc' },
+              take: 10
+            }
+          },
+          orderBy: { shiftStart: 'desc' }
+        });
+
+        if (allOpenRegisters.length === 0) {
+          res.json({
+            success: true,
+            data: {
+              status: 'CLOSED',
+              message: i18n.t('cash.no_open_register')
+            }
+          });
+          return;
+        }
+
+        // Aggregate balances from all open registers
+        const totalOpeningBalance = allOpenRegisters.reduce((total, register) => {
+          return total.add(new Money(register.openingBalance));
+        }, Money.zero());
+
+        const totalCurrentBalance = allOpenRegisters.reduce((total, register) => {
+          return total.add(new Money(register.currentBalance));
+        }, Money.zero());
+
+        // Combine recent cash flows from all registers
+        const allCashFlows = allOpenRegisters
+          .flatMap(register => register.cashFlows.map(cf => ({ ...cf, operatorId: register.operatorId })))
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+          .slice(0, 10);
+
+        const recentCashFlows = allCashFlows.map((cf: any) => ({
+          id: cf.id,
+          type: cf.type,
+          amount: new Money(cf.amount).formatPesos(),
+          reason: cf.reason,
+          timestamp: i18n.formatDateTime(cf.timestamp),
+          operator: cf.operatorId
+        }));
+
+        res.json({
+          success: true,
+          data: {
+            registerId: 'AGGREGATED',
+            status: 'OPEN',
+            openingBalance: totalOpeningBalance.formatPesos(),
+            currentBalance: totalCurrentBalance.formatPesos(),
+            shiftStart: i18n.formatDateTime(allOpenRegisters[0].shiftStart),
+            lastUpdated: i18n.formatDateTime(new Date()),
+            recentCashFlows,
+            openRegisters: allOpenRegisters.length,
+            operators: allOpenRegisters.map(r => r.operatorId),
+            message: `${allOpenRegisters.length} caja(s) registradora(s) abierta(s)`
+          }
+        });
+        return;
+      }
+
+      // Normal operator-specific lookup
       const cashRegister = await prisma.cashRegister.findFirst({
         where: {
           status: 'OPEN',
