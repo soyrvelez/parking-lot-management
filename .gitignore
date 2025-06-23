@@ -37,4 +37,5 @@ venv/
 pip-log.txt
 
 # Thermal printer test files
-print_test_*
+print_test_*# Build artifacts
+src/frontend/.next/

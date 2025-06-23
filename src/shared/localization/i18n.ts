@@ -276,7 +276,135 @@ export class I18n {
       return `$${amount.toFixed(2)} ${this.t('currency.pesos')}`;
     }
   }
-
+  
+    /**
+     * Translate hardware status values from English to Spanish
+     * Maps common hardware status values to their Spanish equivalents
+     */
+    public translateHardwareStatus(statusKey: string, value: string | boolean | number): string {
+      // Handle boolean values
+      if (typeof value === 'boolean') {
+        if (statusKey === 'connected' || statusKey === 'online') {
+          return value ? this.t('hardware.status_connected') : this.t('hardware.status_disconnected');
+        }
+        if (statusKey === 'ready') {
+          return value ? this.t('hardware.status_ready') : this.t('hardware.status_error');
+        }
+        if (statusKey === 'coverOpen') {
+          return value ? this.t('hardware.cover_open') : this.t('hardware.cover_closed');
+        }
+        if (statusKey === 'focusActive') {
+          return value ? this.t('hardware.status_ready') : this.t('hardware.status_offline');
+        }
+        // Default boolean handling
+        return value ? 'Sí' : 'No';
+      }
+      
+      // Handle string values
+      if (typeof value === 'string') {
+        const upperValue = value.toUpperCase();
+        
+        // Common status values
+        switch (upperValue) {
+          case 'CONNECTED':
+            return this.t('hardware.status_connected');
+          case 'DISCONNECTED':
+            return this.t('hardware.status_disconnected');
+          case 'ONLINE':
+            return this.t('hardware.status_online');
+          case 'OFFLINE':
+            return this.t('hardware.status_offline');
+          case 'READY':
+            return this.t('hardware.status_ready');
+          case 'BUSY':
+            return this.t('hardware.status_busy');
+          case 'ERROR':
+            return this.t('hardware.status_error');
+          case 'OK':
+            return this.t('hardware.status_ok');
+          case 'UNKNOWN':
+            return this.t('hardware.status_unknown');
+          case 'NORMAL':
+            return this.t('hardware.status_normal');
+          case 'HIGH':
+            return this.t('hardware.status_high');
+          case 'LOW':
+            return this.t('hardware.status_low');
+          case 'CRITICAL':
+            return this.t('hardware.status_critical');
+          case 'WARNING':
+            return this.t('hardware.status_warning');
+            
+          // Overall system status
+          case 'HEALTHY':
+            return this.t('hardware.overall_status_healthy');
+          case 'DEGRADED':
+            return this.t('hardware.overall_status_degraded');
+            
+          // Paper status
+          case 'PAPER_OK':
+            return this.t('hardware.paper_status_ok');
+          case 'PAPER_LOW':
+            return this.t('hardware.paper_status_low');
+          case 'PAPER_EMPTY':
+            return this.t('hardware.paper_status_empty');
+          case 'PAPER_UNKNOWN':
+            return this.t('hardware.paper_status_unknown');
+            
+          // Temperature status
+          case 'TEMPERATURE_NORMAL':
+            return this.t('hardware.temperature_normal');
+          case 'TEMPERATURE_HIGH':
+            return this.t('hardware.temperature_high');
+          case 'TEMPERATURE_CRITICAL':
+            return this.t('hardware.temperature_critical');
+          case 'TEMPERATURE_UNKNOWN':
+            return this.t('hardware.temperature_unknown');
+            
+          default:
+            // If no specific translation found, return the original value
+            return value;
+        }
+      }
+      
+      // Handle numeric values (just return as string)
+      if (typeof value === 'number') {
+        return value.toString();
+      }
+      
+      // Fallback for any other type
+      return String(value);
+    }
+  
+    /**
+     * Translate entire hardware health object to Spanish
+     * Recursively translates all status values in a hardware health response
+     */
+    public translateHardwareHealth(health: any): any {
+      if (!health || typeof health !== 'object') {
+        return health;
+      }
+      
+      const translated: any = {};
+      
+      for (const [key, value] of Object.entries(health)) {
+        if (key === 'lastHealthCheck' || key === 'lastUpdate' || key === 'lastScan') {
+          // Keep dates as-is
+          translated[key] = value;
+        } else if (key === 'errors' && Array.isArray(value)) {
+          // Keep error arrays as-is (they should already be in Spanish)
+          translated[key] = value;
+        } else if (typeof value === 'object' && value !== null) {
+          // Recursively translate nested objects
+          translated[key] = this.translateHardwareHealth(value);
+        } else {
+          // Translate individual status values
+          translated[key] = this.translateHardwareStatus(key, value as string);
+        }
+      }
+      
+      return translated;
+    }
   /**
    * Generate a complete receipt template with proper Spanish formatting
    */

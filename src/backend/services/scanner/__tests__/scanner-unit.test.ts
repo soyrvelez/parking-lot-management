@@ -4,7 +4,7 @@
  */
 
 import { BarcodeScannerService } from '../barcode-scanner.service';
-import { ScannerStatus } from '@/shared/types/hardware';
+import { ScannerStatus } from '../../../../shared/types/hardware';
 
 // Set test environment
 process.env.NODE_ENV = 'test';
