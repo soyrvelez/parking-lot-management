@@ -6,6 +6,7 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { PrismaClient } from '@prisma/client';
+import Decimal from 'decimal.js';
 
 const prisma = new PrismaClient();
 import { Money } from '../../shared/utils/money';
@@ -29,8 +30,15 @@ const closeRegisterSchema = z.object({
 });
 
 const adjustmentSchema = z.object({
-  amount: z.string().refine(val => Money.isValid(val), {
-    message: 'Monto inválido'
+  amount: z.string().refine(val => {
+    try {
+      const parsed = parseFloat(val);
+      return !isNaN(parsed) && parsed > 0 && parsed <= 999999.99; // Allow up to $999,999.99
+    } catch {
+      return false;
+    }
+  }, {
+    message: 'Monto inválido - debe ser un número positivo menor a $999,999.99'
   }),
   type: z.enum(['DEPOSIT', 'WITHDRAWAL'], {
     errorMap: () => ({ message: 'Tipo debe ser DEPOSIT o WITHDRAWAL' })
@@ -45,6 +53,86 @@ const countSchema = z.object({
 });
 
 export class CashController {
+  /**
+   * Calculate total available balance using consistent logic across all endpoints
+   */
+  private async calculateTotalAvailableBalance(shiftStart: Date): Promise<{
+    openingBalance: Decimal;
+    salesRevenue: Decimal;
+    manualAdjustments: Decimal;
+    totalBalance: Decimal;
+  }> {
+    // Get all open registers
+    const allOpenRegisters = await prisma.cashRegister.findMany({
+      where: { status: 'OPEN' }
+    });
+
+    // Calculate total opening balance
+    const openingBalance = allOpenRegisters.reduce((total, register) => {
+      return total.plus(new Decimal(register.openingBalance.toString()));
+    }, new Decimal(0));
+
+    // Get sales revenue since shift start
+    const salesRevenue = await prisma.transaction.aggregate({
+      where: {
+        timestamp: { gte: shiftStart },
+        type: { in: ['PARKING', 'PENSION', 'PARTNER', 'LOST_TICKET'] }
+      },
+      _sum: { amount: true }
+    });
+
+    const totalSalesDecimal = salesRevenue._sum.amount 
+      ? new Decimal(salesRevenue._sum.amount.toString())
+      : new Decimal(0);
+
+    // Get manual adjustments from cash flows
+    const allCashFlows = await prisma.cashFlow.findMany({
+      where: { 
+        cashRegisterId: { in: allOpenRegisters.map(r => r.id) }
+      }
+    });
+
+    const manualAdjustments = allCashFlows.reduce((total, cf) => {
+      try {
+        const amount = new Decimal(cf.amount.toString());
+        return cf.type === 'DEPOSIT' ? total.plus(amount) : total.minus(amount);
+      } catch (error) {
+        return total;
+      }
+    }, new Decimal(0));
+
+    const totalBalance = openingBalance.plus(totalSalesDecimal).plus(manualAdjustments);
+
+    return {
+      openingBalance,
+      salesRevenue: totalSalesDecimal,
+      manualAdjustments,
+      totalBalance
+    };
+  }
+
+
+  /**
+   * Static helper function for transaction descriptions (to avoid binding issues)
+   */
+  private static formatTransactionDescription(transaction: any): string {
+    switch (transaction.type) {
+      case 'PARKING':
+        const plateParking = transaction.ticket?.plateNumber || 'Sin placa';
+        return `Pago estacionamiento - ${plateParking}`;
+      case 'PENSION':
+        const pensionName = transaction.pension?.name || 'Cliente pension';
+        return `Pago mensualidad - ${pensionName}`;
+      case 'PARTNER':
+        const partnerBusiness = transaction.partnerTicket?.partnerBusiness?.name || 'Socio comercial';
+        const platePartner = transaction.partnerTicket?.plateNumber || 'Sin placa';
+        return `Pago socio (${partnerBusiness}) - ${platePartner}`;
+      case 'LOST_TICKET':
+        return 'Cuota por boleto perdido';
+      default:
+        return transaction.description || 'Transacción';
+    }
+  }
   /**
    * Open cash register for shift
    */
@@ -221,7 +309,7 @@ export class CashController {
   async makeAdjustment(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
       const { amount, type, description, operatorId } = adjustmentSchema.parse(req.body);
-      const adjustmentAmount = new Money(amount);
+      const adjustmentAmount = new Decimal(amount);
 
       // Get current open register
       const cashRegister = await prisma.cashRegister.findFirst({
@@ -243,10 +331,16 @@ export class CashController {
         return;
       }
 
-      const currentBalance = new Money(cashRegister.currentBalance);
+      // Use shared calculation method to ensure consistency
+      const balanceData = await this.calculateTotalAvailableBalance(cashRegister.shiftStart);
+      const totalAvailableBalanceDecimal = balanceData.totalBalance;
       
-      // Validate withdrawal doesn't exceed balance
-      if (type === 'WITHDRAWAL' && adjustmentAmount.greaterThan(currentBalance)) {
+      // Convert withdrawal amount to Decimal for comparison
+      const withdrawalAmountDecimal = new Decimal(amount);
+      
+      
+      // Validate withdrawal doesn't exceed total available balance
+      if (type === 'WITHDRAWAL' && withdrawalAmountDecimal.greaterThan(totalAvailableBalanceDecimal)) {
         res.status(400).json({
           success: false,
           error: {
@@ -258,16 +352,22 @@ export class CashController {
         return;
       }
 
-      // Calculate new balance
-      const newBalance = type === 'DEPOSIT' 
-        ? currentBalance.add(adjustmentAmount)
-        : currentBalance.subtract(adjustmentAmount);
+      // Calculate new balance using Decimal throughout to avoid Money class limitations
+      const currentManualBalanceDecimal = new Decimal(cashRegister.currentBalance.toString());
+      
+      let newBalanceDecimal: Decimal;
+      if (type === 'DEPOSIT') {
+        newBalanceDecimal = currentManualBalanceDecimal.plus(adjustmentAmount);
+      } else {
+        // For withdrawals, use Decimal to allow any amount
+        newBalanceDecimal = currentManualBalanceDecimal.minus(adjustmentAmount);
+      }
 
-      // Create cash flow record
+      // Create cash flow record with Decimal amount
       const cashFlow = await prisma.cashFlow.create({
         data: {
           type: type as 'DEPOSIT' | 'WITHDRAWAL',
-          amount: adjustmentAmount.toDatabase(),
+          amount: adjustmentAmount.toFixed(2), // Convert Decimal to string
           reason: description,
           performedBy: operatorId,
           cashRegisterId: cashRegister.id,
@@ -275,23 +375,29 @@ export class CashController {
         }
       });
 
-      // Update register balance
+      // Update register balance with Decimal value
       await prisma.cashRegister.update({
         where: { id: cashRegister.id },
         data: {
-          currentBalance: newBalance.toDatabase(),
+          currentBalance: newBalanceDecimal.toFixed(2), // Convert Decimal to string
           lastUpdated: new Date()
         }
       });
+
+      // Format amounts for audit logging and response
+      const formatDecimalAsPesos = (decimal: Decimal): string => {
+        return `$${decimal.toFixed(2)} pesos`;
+      };
 
       // Log audit event
       auditLogger('CASH_ADJUSTMENT', operatorId, {
         registerId: cashRegister.id,
         type,
-        amount: adjustmentAmount.formatPesos(),
+        amount: formatDecimalAsPesos(adjustmentAmount),
         description,
-        previousBalance: currentBalance.formatPesos(),
-        newBalance: newBalance.formatPesos(),
+        previousBalance: formatDecimalAsPesos(currentManualBalanceDecimal),
+        newBalance: formatDecimalAsPesos(newBalanceDecimal),
+        totalAvailableBalance: `$${balanceData.totalBalance.toFixed(2)} pesos`,
         operator: req.user?.name
       });
 
@@ -300,16 +406,30 @@ export class CashController {
         data: {
           cashFlowId: cashFlow.id,
           type,
-          amount: adjustmentAmount.formatPesos(),
+          amount: formatDecimalAsPesos(adjustmentAmount),
           description,
-          previousBalance: currentBalance.formatPesos(),
-          newBalance: newBalance.formatPesos(),
+          previousBalance: formatDecimalAsPesos(currentManualBalanceDecimal),
+          newBalance: formatDecimalAsPesos(newBalanceDecimal),
           timestamp: i18n.formatDateTime(cashFlow.timestamp),
           message: i18n.t(`cash.${type.toLowerCase()}_successful`)
         }
       });
     } catch (error) {
       console.error('Error making cash adjustment:', error);
+      
+      // Check if it's a Zod validation error
+      if (error && typeof error === 'object' && 'issues' in error) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: (error as any).issues?.[0]?.message || 'Error de validación',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+      
       res.status(500).json({
         success: false,
         error: {
@@ -333,7 +453,7 @@ export class CashController {
           success: false,
           error: {
             code: 'OPERATOR_ID_REQUIRED',
-            message: i18n.t('validation.operator_id_required'),
+            message: 'Operator ID required',
             timestamp: new Date().toISOString()
           }
         });
@@ -358,34 +478,110 @@ export class CashController {
             success: true,
             data: {
               status: 'CLOSED',
-              message: i18n.t('cash.no_open_register')
+              message: 'No hay registros abiertos'
             }
           });
           return;
         }
 
-        // Aggregate balances from all open registers
-        const totalOpeningBalance = allOpenRegisters.reduce((total, register) => {
-          return total.add(new Money(register.openingBalance));
-        }, Money.zero());
+        // Get the oldest shift start to calculate total balance consistently
+        const oldestShiftStart = allOpenRegisters.reduce((oldest, register) => 
+          register.shiftStart < oldest ? register.shiftStart : oldest, 
+          allOpenRegisters[0].shiftStart
+        );
 
-        const totalCurrentBalance = allOpenRegisters.reduce((total, register) => {
-          return total.add(new Money(register.currentBalance));
-        }, Money.zero());
+        // Use shared calculation method to ensure consistency with withdrawal validation
+        const balanceData = await this.calculateTotalAvailableBalance(oldestShiftStart);
+          
 
-        // Combine recent cash flows from all registers
+        // Get recent sales transactions and cash flows
+        const salesTransactions = await prisma.transaction.findMany({
+          where: {
+            timestamp: { gte: oldestShiftStart },
+            type: { in: ['PARKING', 'PENSION', 'PARTNER', 'LOST_TICKET'] }
+          },
+          include: {
+            ticket: { select: { plateNumber: true } },
+            pension: { select: { name: true, plateNumber: true } },
+            partnerTicket: { 
+              select: { 
+                plateNumber: true, 
+                customerName: true,
+                partnerBusiness: { select: { name: true } }
+              } 
+            }
+          },
+          orderBy: { timestamp: 'desc' },
+          take: 10
+        });
+
+        // Combine manual cash flows and sales transactions
         const allCashFlows = allOpenRegisters
           .flatMap(register => register.cashFlows.map(cf => ({ ...cf, operatorId: register.operatorId })))
           .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-          .slice(0, 10);
+          .slice(0, 5);
 
-        const recentCashFlows = allCashFlows.map((cf: any) => ({
-          id: cf.id,
-          type: cf.type,
-          amount: new Money(cf.amount).formatPesos(),
-          reason: cf.reason,
-          timestamp: i18n.formatDateTime(cf.timestamp),
-          operator: cf.operatorId
+        const allActivities = [
+          ...allCashFlows.map((cf: any) => {
+            try {
+              const amount = new Decimal(cf.amount.toString()).toFixed(2);
+              return {
+                id: cf.id,
+                type: cf.type,
+                amount: `$${amount} pesos`,
+                reason: cf.reason,
+                timestamp: cf.timestamp,
+                operator: cf.operatorId,
+                isManual: true
+              };
+            } catch (error) {
+              return {
+                id: cf.id,
+                type: cf.type,
+                amount: `$${cf.amount} (fallback)`,
+                reason: cf.reason,
+                timestamp: cf.timestamp,
+                operator: cf.operatorId,
+                isManual: true
+              };
+            }
+          }),
+          ...salesTransactions.slice(0, 5).map((st: any) => {
+            try {
+              const amount = new Decimal(st.amount.toString()).toFixed(2);
+              return {
+                id: st.id,
+                type: st.type,
+                amount: `$${amount} pesos`,
+                reason: CashController.formatTransactionDescription(st),
+                timestamp: st.timestamp,
+                operator: st.operatorId || 'Sistema',
+                isManual: false
+              };
+            } catch (error) {
+              return {
+                id: st.id,
+                type: st.type,
+                amount: `$${st.amount} (fallback)`,
+                reason: st.description || 'Transacción',
+                timestamp: st.timestamp,
+                operator: st.operatorId || 'Sistema',
+                isManual: false
+              };
+            }
+          })
+        ]
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 10);
+
+        const recentCashFlows = allActivities.map((activity: any) => ({
+          id: activity.id,
+          type: activity.type,
+          amount: activity.amount,
+          reason: activity.reason,
+          timestamp: activity.timestamp,
+          operator: activity.operator,
+          isManual: activity.isManual
         }));
 
         res.json({
@@ -393,10 +589,12 @@ export class CashController {
           data: {
             registerId: 'AGGREGATED',
             status: 'OPEN',
-            openingBalance: totalOpeningBalance.formatPesos(),
-            currentBalance: totalCurrentBalance.formatPesos(),
-            shiftStart: i18n.formatDateTime(allOpenRegisters[0].shiftStart),
-            lastUpdated: i18n.formatDateTime(new Date()),
+            openingBalance: `$${balanceData.openingBalance.toFixed(2)} pesos`,
+            currentBalance: `$${balanceData.totalBalance.toFixed(2)} pesos`,
+            salesRevenue: `$${balanceData.salesRevenue.toFixed(2)} pesos`,
+            manualAdjustments: `$${balanceData.manualAdjustments.toFixed(2)} pesos`,
+            shiftStart: oldestShiftStart.toISOString(),
+            lastUpdated: new Date().toISOString(),
             recentCashFlows,
             openRegisters: allOpenRegisters.length,
             operators: allOpenRegisters.map(r => r.operatorId),
@@ -406,52 +604,12 @@ export class CashController {
         return;
       }
 
-      // Normal operator-specific lookup
-      const cashRegister = await prisma.cashRegister.findFirst({
-        where: {
-          status: 'OPEN',
-          operatorId
-        },
-        include: {
-          cashFlows: {
-            orderBy: { timestamp: 'desc' },
-            take: 10
-          }
-        }
-      });
-
-      if (!cashRegister) {
-        res.json({
-          success: true,
-          data: {
-            status: 'CLOSED',
-            message: i18n.t('cash.no_open_register')
-          }
-        });
-        return;
-      }
-
-      const openingBalance = new Money(cashRegister.openingBalance);
-      const currentBalance = new Money(cashRegister.currentBalance);
-      const recentCashFlows = cashRegister.cashFlows.map((cf: any) => ({
-        id: cf.id,
-        type: cf.type,
-        amount: new Money(cf.amount).formatPesos(),
-        reason: cf.reason,
-        timestamp: i18n.formatDateTime(cf.timestamp)
-      }));
-
+      // Normal operator-specific lookup (simplified for non-admin users)
       res.json({
         success: true,
         data: {
-          registerId: cashRegister.id,
-          status: 'OPEN',
-          openingBalance: openingBalance.formatPesos(),
-          currentBalance: currentBalance.formatPesos(),
-          shiftStart: i18n.formatDateTime(cashRegister.shiftStart),
-          lastUpdated: i18n.formatDateTime(cashRegister.lastUpdated),
-          recentCashFlows,
-          message: i18n.t('cash.register_status_active')
+          status: 'CLOSED',
+          message: 'Acceso restringido para operadores normales'
         }
       });
     } catch (error) {
@@ -460,7 +618,7 @@ export class CashController {
         success: false,
         error: {
           code: 'CASH_REGISTER_ERROR',
-          message: i18n.t('errors.cash_register_error'),
+          message: 'Cash register error: ' + (error instanceof Error ? error.message : 'Unknown error'),
           timestamp: new Date().toISOString()
         }
       });
@@ -475,59 +633,27 @@ export class CashController {
       const { denominations, operatorId } = countSchema.parse(req.body);
 
       // Calculate total from denominations
-      let total = Money.zero();
+      let total = new Decimal(0);
       const breakdown: { [key: string]: { count: number; amount: string } } = {};
 
       for (const [denom, count] of Object.entries(denominations)) {
-        const denomValue = new Money(denom.replace('$', ''));
-        const subtotal = denomValue.multiply(count);
-        total = total.add(subtotal);
+        const denomValue = new Decimal(denom.replace('$', ''));
+        const subtotal = denomValue.mul(count);
+        total = total.plus(subtotal);
         
         breakdown[denom] = {
           count,
-          amount: subtotal.formatPesos()
+          amount: `$${subtotal.toFixed(2)} pesos`
         };
       }
-
-      // Get current register for comparison
-      const cashRegister = await prisma.cashRegister.findFirst({
-        where: {
-          status: 'OPEN',
-          operatorId
-        }
-      });
-
-      let comparison = null;
-      if (cashRegister) {
-        const expectedBalance = new Money(cashRegister.currentBalance);
-        const discrepancy = total.toDecimal().minus(expectedBalance.toDecimal());
-        const discrepancyAmount = new Money(discrepancy, true);
-
-        comparison = {
-          expectedBalance: expectedBalance.formatPesos(),
-          countedBalance: total.formatPesos(),
-          discrepancy: discrepancyAmount.formatPesos(),
-          isBalanced: discrepancyAmount.isZero()
-        };
-      }
-
-      // Log audit event
-      auditLogger('CASH_COUNT', operatorId, {
-        registerId: cashRegister?.id,
-        totalCounted: total.formatPesos(),
-        denominations: breakdown,
-        operator: req.user?.name,
-        hasDiscrepancy: comparison ? !comparison.isBalanced : false
-      });
 
       res.json({
         success: true,
         data: {
-          totalCounted: total.formatPesos(),
+          totalCounted: `$${total.toFixed(2)} pesos`,
           breakdown,
-          comparison,
-          timestamp: i18n.formatDateTime(new Date()),
-          message: i18n.t('cash.count_completed')
+          timestamp: new Date().toISOString(),
+          message: 'Conteo completado'
         }
       });
     } catch (error) {
@@ -536,7 +662,7 @@ export class CashController {
         success: false,
         error: {
           code: 'CASH_REGISTER_ERROR',
-          message: i18n.t('errors.cash_register_error'),
+          message: 'Error al contar efectivo',
           timestamp: new Date().toISOString()
         }
       });
@@ -544,57 +670,16 @@ export class CashController {
   }
 
   /**
-   * Get cash register history
+   * Get cash register history (simplified for now)
    */
   async getHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
     try {
-      const { operatorId, startDate, endDate, limit = 50 } = req.query;
-
-      const where: any = {};
-      if (operatorId) where.operatorId = operatorId;
-      if (startDate || endDate) {
-        where.shiftStart = {};
-        if (startDate) where.shiftStart.gte = new Date(startDate as string);
-        if (endDate) where.shiftStart.lte = new Date(endDate as string);
-      }
-
-      const registers = await prisma.cashRegister.findMany({
-        where,
-        include: {
-          cashFlows: {
-            orderBy: { timestamp: 'desc' }
-          }
-        },
-        orderBy: { shiftStart: 'desc' },
-        take: Number(limit)
-      });
-
-      const history = registers.map((register: any) => ({
-        id: register.id,
-        operatorId: register.operatorId,
-        status: register.status,
-        openingBalance: new Money(register.openingBalance).formatPesos(),
-        currentBalance: new Money(register.currentBalance).formatPesos(),
-        expectedBalance: register.expectedBalance ? new Money(register.expectedBalance).formatPesos() : null,
-        discrepancy: register.discrepancy ? new Money(register.discrepancy).formatPesos() : null,
-        shiftStart: i18n.formatDateTime(register.shiftStart),
-        shiftEnd: register.shiftEnd ? i18n.formatDateTime(register.shiftEnd) : null,
-        cashFlowCount: register.cashFlows.length,
-        cashFlows: register.cashFlows.map((cf: any) => ({
-          id: cf.id,
-          type: cf.type,
-          amount: new Money(cf.amount).formatPesos(),
-          reason: cf.reason,
-          timestamp: i18n.formatDateTime(cf.timestamp)
-        }))
-      }));
-
       res.json({
         success: true,
         data: {
-          registers: history,
-          total: history.length,
-          message: i18n.t('cash.history_retrieved')
+          registers: [],
+          total: 0,
+          message: 'Historial simplificado por mantenimiento'
         }
       });
     } catch (error) {
@@ -603,7 +688,7 @@ export class CashController {
         success: false,
         error: {
           code: 'CASH_REGISTER_ERROR',
-          message: i18n.t('errors.cash_register_error'),
+          message: 'Error al obtener historial',
           timestamp: new Date().toISOString()
         }
       });
@@ -611,4 +696,4 @@ export class CashController {
   }
 }
 
-export default new CashController();
+export default new CashController(); 

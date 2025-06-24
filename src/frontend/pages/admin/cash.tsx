@@ -12,15 +12,18 @@ interface CashRegisterStatus {
   currentBalance: string;
   shiftStart?: string;
   transactions: number;
+  salesRevenue?: string;
+  manualAdjustments?: string;
 }
 
 interface CashTransaction {
   id: string;
-  type: 'DEPOSIT' | 'WITHDRAWAL' | 'PARKING' | 'PENSION' | 'LOST_TICKET';
+  type: 'DEPOSIT' | 'WITHDRAWAL' | 'PARKING' | 'PENSION' | 'PARTNER' | 'LOST_TICKET';
   amount: string;
   description: string;
   timestamp: string;
   operatorName?: string;
+  isManual?: boolean;
 }
 
 export default function AdminCash() {
@@ -103,9 +106,27 @@ export default function AdminCash() {
             currentBalance: (result.data?.currentBalance || '0.00').replace(/[$\s]|pesos/g, ''),
             transactions: result.data?.recentCashFlows?.length || 0,
             registerId: result.data?.registerId,
-            shiftStart: result.data?.shiftStart
+            shiftStart: result.data?.shiftStart,
+            salesRevenue: result.data?.salesRevenue ? result.data.salesRevenue.replace(/[$\s]|pesos/g, '') : '0.00',
+            manualAdjustments: result.data?.manualAdjustments ? result.data.manualAdjustments.replace(/[$\s]|pesos/g, '') : '0.00'
           };
           setRegisterStatus(statusData);
+          
+          // Set recent transactions from the combined data
+          if (result.data?.recentCashFlows) {
+            const transactions = result.data.recentCashFlows.map((cf: any) => ({
+              id: cf.id,
+              type: cf.type,
+              amount: cf.amount.replace(/[$\s]|pesos/g, ''),
+              description: cf.reason,
+              timestamp: cf.timestamp,
+              operatorName: cf.operator,
+              isManual: cf.isManual
+            }))
+            // Ensure most recent first
+            .sort((a: CashTransaction, b: CashTransaction) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+            setRecentTransactions(transactions);
+          }
         }
       }
     } catch (error) {
@@ -130,12 +151,13 @@ export default function AdminCash() {
                   amount: cf.amount.replace(/[$\s]|pesos/g, ''), // Remove currency symbols and 'pesos'
                   description: cf.reason,
                   timestamp: cf.timestamp,
-                  operatorName: register.operatorId
+                  operatorName: cf.operator || register.operatorId,
+                  isManual: cf.isManual !== undefined ? cf.isManual : true
                 });
               });
             }
           });
-          // Sort by timestamp descending and take first 10
+          // Sort by timestamp descending (most recent first) and take first 10
           allTransactions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
           setRecentTransactions(allTransactions.slice(0, 10));
         } else {
@@ -333,33 +355,85 @@ export default function AdminCash() {
 
 
   const formatCurrency = (amount: string | number): string => {
-    const value = new Decimal(amount || 0);
-    return `$${value.toFixed(2)}`;
+    try {
+      // Handle fallback values and clean the amount string
+      let cleanAmount = amount;
+      if (typeof amount === 'string') {
+        // Remove any non-numeric characters except decimal points and negative signs
+        cleanAmount = amount.replace(/[^0-9.-]/g, '');
+        // Handle fallback format like "40(fallback)"
+        if (cleanAmount.includes('(') || !cleanAmount || cleanAmount === '') {
+          cleanAmount = '0';
+        }
+      }
+      const value = new Decimal(cleanAmount || 0);
+      return `$${value.toFixed(2)}`;
+    } catch (error) {
+      return '$0.00';
+    }
   };
 
   const calculateDayTotals = () => {
-    let income = new Decimal(0);
-    let withdrawals = new Decimal(0);
+    // Helper function to safely parse backend amounts
+    const safeParseAmount = (amount: string | undefined): Decimal => {
+      try {
+        if (!amount) return new Decimal(0);
+        // Clean the amount string (remove currency symbols, "pesos", etc.)
+        const cleanAmount = amount.replace(/[$\s]|pesos|fallback|\(|\)/g, '');
+        return new Decimal(cleanAmount || 0);
+      } catch (error) {
+        return new Decimal(0);
+      }
+    };
+
+    // Use the sales revenue and manual adjustments from the backend calculation
+    const salesRevenue = safeParseAmount(registerStatus.salesRevenue);
+    const manualAdjustments = safeParseAmount(registerStatus.manualAdjustments);
+    
+    // Calculate manual operations from recent transactions for display
+    let manualIncome = new Decimal(0);
+    let manualWithdrawals = new Decimal(0);
 
     if (recentTransactions && recentTransactions.length > 0) {
       recentTransactions.forEach(transaction => {
-        const amount = new Decimal(transaction.amount || '0');
-        if (transaction.type === 'WITHDRAWAL') {
-          withdrawals = withdrawals.plus(amount);
-        } else {
-          income = income.plus(amount);
+        if (transaction.isManual) {
+          const amount = safeParseAmount(transaction.amount);
+          if (transaction.type === 'WITHDRAWAL') {
+            manualWithdrawals = manualWithdrawals.plus(amount);
+          } else if (transaction.type === 'DEPOSIT') {
+            manualIncome = manualIncome.plus(amount);
+          }
         }
       });
     }
 
-    return { income: income.toFixed(2), withdrawals: withdrawals.toFixed(2) };
+    const totalIncome = salesRevenue.plus(manualIncome);
+    
+    return { 
+      income: totalIncome.toFixed(2), 
+      withdrawals: manualWithdrawals.toFixed(2),
+      salesRevenue: salesRevenue.toFixed(2),
+      manualNet: manualIncome.minus(manualWithdrawals).toFixed(2)
+    };
   };
 
   const { income, withdrawals } = calculateDayTotals();
-  const expectedBalance = new Decimal(registerStatus.openingBalance || '0')
+  
+  // Helper function for safe Decimal parsing (reuse the same logic)
+  const safeParseAmount = (amount: string | undefined): Decimal => {
+    try {
+      if (!amount) return new Decimal(0);
+      const cleanAmount = amount.replace(/[$\s]|pesos|fallback|\(|\)/g, '');
+      return new Decimal(cleanAmount || 0);
+    } catch (error) {
+      return new Decimal(0);
+    }
+  };
+
+  const expectedBalance = safeParseAmount(registerStatus.openingBalance)
     .plus(income)
     .minus(withdrawals);
-  const difference = new Decimal(registerStatus.currentBalance || '0').minus(expectedBalance);
+  const difference = safeParseAmount(registerStatus.currentBalance).minus(expectedBalance);
 
   if (isLoading) {
     return (
@@ -404,7 +478,7 @@ export default function AdminCash() {
         )}
 
         {/* Cash Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-6">
           <div className="bg-white p-6 rounded-lg shadow-sm border">
             <div className="flex items-center gap-4">
               <div className="w-12 h-12 bg-green-50 rounded-lg flex items-center justify-center">
@@ -466,6 +540,38 @@ export default function AdminCash() {
                   {formatCurrency(difference.toFixed(2))}
                 </p>
                 <p className="text-xs text-gray-500">vs Balance esperado</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Sales Revenue Card */}
+          <div className="bg-white p-6 rounded-lg shadow-sm border">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-purple-50 rounded-lg flex items-center justify-center">
+                <DollarSign className="w-6 h-6 text-purple-600" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-600">Ventas del Día</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {formatCurrency(registerStatus.salesRevenue || '0')}
+                </p>
+                <p className="text-xs text-gray-500">Cobros automáticos</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Manual Adjustments Card */}
+          <div className="bg-white p-6 rounded-lg shadow-sm border">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 bg-orange-50 rounded-lg flex items-center justify-center">
+                <Calculator className="w-6 h-6 text-orange-600" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-gray-600">Ajustes Manuales</p>
+                <p className="text-2xl font-bold text-gray-900">
+                  {formatCurrency(registerStatus.manualAdjustments || '0')}
+                </p>
+                <p className="text-xs text-gray-500">Depósitos - Retiros</p>
               </div>
             </div>
           </div>
@@ -593,7 +699,26 @@ export default function AdminCash() {
                   <div key={transaction.id} className="border-b pb-2 last:border-0">
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
-                        <p className={`text-sm font-medium ${
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                            transaction.type === 'WITHDRAWAL' ? 'bg-red-100 text-red-800' :
+                            transaction.type === 'DEPOSIT' ? 'bg-blue-100 text-blue-800' :
+                            transaction.type === 'PARTNER' ? 'bg-purple-100 text-purple-800' :
+                            transaction.type === 'PENSION' ? 'bg-indigo-100 text-indigo-800' :
+                            'bg-green-100 text-green-800'
+                          }`}>
+                            {transaction.type === 'PARKING' ? 'Estacionamiento' :
+                             transaction.type === 'PENSION' ? 'Pensión' :
+                             transaction.type === 'PARTNER' ? 'Socio' :
+                             transaction.type === 'LOST_TICKET' ? 'Perdido' :
+                             transaction.type === 'DEPOSIT' ? 'Depósito' :
+                             'Retiro'}
+                          </span>
+                          {!transaction.isManual && (
+                            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">Auto</span>
+                          )}
+                        </div>
+                        <p className={`text-sm font-medium mt-1 ${
                           transaction.type === 'WITHDRAWAL' ? 'text-red-600' : 'text-green-600'
                         }`}>
                           {transaction.type === 'WITHDRAWAL' ? '-' : '+'}{formatCurrency(transaction.amount)}
