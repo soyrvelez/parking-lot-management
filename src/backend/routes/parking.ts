@@ -72,6 +72,15 @@ router.post('/exit', validateRequest(ExitRequestSchema), async (req, res, next) 
   }
 });
 
+// Validate plate for lost ticket (check if active ticket exists)
+router.post('/validate-plate-for-lost-ticket', async (req, res, next) => {
+  try {
+    await parkingController.validatePlateForLostTicket(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Lost ticket handling
 router.post('/lost-ticket', validateRequest(LostTicketRequestSchema), async (req, res, next) => {
   try {
@@ -85,6 +94,15 @@ router.post('/lost-ticket', validateRequest(LostTicketRequestSchema), async (req
 router.get('/tickets/lookup/:barcode', async (req, res, next) => {
   try {
     await parkingController.lookupTicket(req, res);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Ticket lookup by plate number
+router.get('/tickets/by-plate/:plateNumber', async (req, res, next) => {
+  try {
+    await parkingController.getTicketsByPlate(req, res);
   } catch (error) {
     next(error);
   }

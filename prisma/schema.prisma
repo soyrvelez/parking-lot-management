@@ -69,9 +69,11 @@ model Transaction {
   sessionId     String?
   ticketId      String?
   pensionId     String?
+  partnerTicketId String?
   auditLogs     AuditLog[]
   pension       PensionCustomer? @relation(fields: [pensionId], references: [id])
   ticket        Ticket?          @relation(fields: [ticketId], references: [id])
+  partnerTicket PartnerTicket?   @relation(fields: [partnerTicketId], references: [id])
 
   @@index([type])
   @@index([timestamp])
@@ -194,7 +196,9 @@ model AuditLog {
   cashRegisterId  String?
   cashFlowId      String?
   adminId         String?
+  partnerTicketId String?
   admin           Admin?         @relation(fields: [adminId], references: [id])
+  partnerTicket   PartnerTicket? @relation(fields: [partnerTicketId], references: [id])
   cashFlow        CashFlow?      @relation(fields: [cashFlowId], references: [id])
   cashRegister    CashRegister?  @relation(fields: [cashRegisterId], references: [id])
   pricingConfig   PricingConfig? @relation(fields: [pricingConfigId], references: [id])
@@ -219,6 +223,7 @@ enum TicketStatus {
 enum TransactionType {
   PARKING
   PENSION
+  PARTNER
   LOST_TICKET
   REFUND
   WITHDRAWAL
@@ -248,4 +253,90 @@ enum AdminRole {
   ADMIN
   MANAGER
   VIEWER
+}
+
+model PartnerBusiness {
+  id                String    @id @default(cuid())
+  name              String    // "Restaurante Los Comales"
+  businessType      String    // "Restaurante", "Tienda", "Farmacia"
+  contactName       String?   // Contact person name
+  contactPhone      String?   // Business phone
+  contactEmail      String?   // Business email
+  address           String?   // Business address
+  
+  // Pricing Configuration
+  flatRate          Decimal?  @db.Decimal(12, 2)  // Fixed price (e.g., $30 pesos)
+  hourlyRate        Decimal?  @db.Decimal(12, 2)  // Special hourly rate
+  maxHours          Int?      // Maximum hours allowed (e.g., 4 hours max)
+  validDays         String    // JSON array of valid days ["MON","TUE","WED"]
+  validTimeStart    String?   // "09:00" - Valid time range start
+  validTimeEnd      String?   // "18:00" - Valid time range end
+  
+  // Business Details
+  description       String?   // "Cliente del Restaurante Los Comales"
+  specialInstructions String? // "Válido solo con compra mínima de $200"
+  logoUrl           String?   // Business logo for tickets
+  
+  // Status and Metadata
+  isActive          Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  createdBy         String?   // Admin who created this partner
+  
+  // Relations
+  partnerTickets    PartnerTicket[]
+  
+  @@index([isActive])
+  @@index([businessType])
+  @@index([name])
+  @@map("partner_businesses")
+}
+
+model PartnerTicket {
+  id                String    @id @default(cuid())
+  ticketNumber      String    @unique
+  barcode           String    @unique
+  
+  // Vehicle and Entry Info
+  plateNumber       String
+  entryTime         DateTime  @default(now())
+  exitTime          DateTime?
+  
+  // Partner Business Info
+  partnerBusiness   PartnerBusiness @relation(fields: [partnerBusinessId], references: [id])
+  partnerBusinessId String
+  customerName      String?   // Optional customer name
+  
+  // Pricing
+  agreedRate        Decimal   @db.Decimal(12, 2)  // Rate agreed at entry
+  paidAmount        Decimal?  @db.Decimal(12, 2)  // Amount actually paid
+  paymentStatus     PartnerTicketStatus @default(ACTIVE)
+  
+  // Special Instructions
+  businessReference String?   // Reference from business (receipt #, etc.)
+  specialNotes      String?   // Additional notes
+  hasBusinessStamp  Boolean   @default(false) // Whether business stamp was verified
+  chargedRegularRate Boolean  @default(false) // Whether regular parking rate was charged instead
+  
+  // Metadata
+  printedAt         DateTime  @default(now())
+  operatorId        String?
+  
+  // Relations
+  transactions      Transaction[]
+  auditLogs         AuditLog[]
+  
+  @@index([plateNumber])
+  @@index([paymentStatus])
+  @@index([entryTime])
+  @@index([barcode])
+  @@index([partnerBusinessId])
+  @@map("partner_tickets")
+}
+
+enum PartnerTicketStatus {
+  ACTIVE
+  PAID
+  EXPIRED
+  CANCELLED
 }

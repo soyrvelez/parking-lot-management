@@ -5,13 +5,15 @@ import { Money } from '../../../shared/utils/money';
 
 interface PaymentCompletedConfirmationProps {
   paymentData: {
-    ticketNumber: string;
+    ticketNumber?: string;
+    transactionId?: string;
     plateNumber: string;
     totalAmount: string;
     cashReceived: string;
-    changeGiven: string;
+    changeGiven?: string;
     paymentTime: string;
     receiptPrinted?: boolean;
+    transactionType?: string;
   };
   onContinue: () => void;
   onNewEntry: () => void;
@@ -32,23 +34,40 @@ export default function PaymentCompletedConfirmation({
     setReprintSuccess('');
 
     try {
-      const response = await fetch('/api/hardware/print-receipt', {
+      // Determine which endpoint to use based on transaction type
+      const isLostTicket = paymentData.transactionType === 'LOST_TICKET';
+      const endpoint = isLostTicket ? '/api/hardware/print-lost-ticket-receipt' : '/api/hardware/print-receipt';
+      
+      // Prepare request body based on transaction type
+      const requestBody = isLostTicket ? {
+        transactionId: paymentData.transactionId,
+        plateNumber: paymentData.plateNumber,
+        cashReceived: parseFloat(paymentData.cashReceived.replace(/[^0-9.]/g, '')),
+        change: parseFloat((paymentData.changeGiven || '0').replace(/[^0-9.]/g, '')),
+        lostTicketFee: parseFloat(paymentData.totalAmount.replace(/[^0-9.]/g, '')),
+        reprint: true
+      } : {
+        ticketId: paymentData.ticketNumber,
+        amountPaid: paymentData.cashReceived,
+        change: paymentData.changeGiven || '0',
+        reprint: true
+      };
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          ticketId: paymentData.ticketNumber,
-          amountPaid: paymentData.cashReceived,
-          change: paymentData.changeGiven,
-          reprint: true 
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await response.json();
 
       if (response.ok) {
-        setReprintSuccess('¡Recibo reimpreso exitosamente!');
+        const successMessage = isLostTicket 
+          ? '¡Recibo de boleto extraviado reimpreso exitosamente!'
+          : '¡Recibo reimpreso exitosamente!';
+        setReprintSuccess(successMessage);
         // Clear success message after 3 seconds
         setTimeout(() => setReprintSuccess(''), 3000);
       } else {
@@ -83,7 +102,9 @@ export default function PaymentCompletedConfirmation({
     }
   };
 
-  const hasChange = parseFloat(paymentData.changeGiven.replace('$', '').replace(' MXN', '')) > 0;
+  const hasChange = paymentData.changeGiven ? 
+    parseFloat(paymentData.changeGiven.replace('$', '').replace(' MXN', '')) > 0 : 
+    false;
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -93,10 +114,14 @@ export default function PaymentCompletedConfirmation({
           <CheckCircle className="w-12 h-12 text-green-600" />
         </div>
         <h2 className="text-3xl font-bold text-green-700 mb-2">
-          ¡Pago Procesado Exitosamente!
+          {paymentData.transactionType === 'LOST_TICKET' 
+            ? '¡Boleto Extraviado Procesado!'
+            : '¡Pago Procesado Exitosamente!'}
         </h2>
         <p className="text-xl text-gray-600">
-          El vehículo puede salir del estacionamiento
+          {paymentData.transactionType === 'LOST_TICKET'
+            ? 'Tarifa de boleto extraviado cobrada exitosamente'
+            : 'El vehículo puede salir del estacionamiento'}
         </p>
       </div>
 
@@ -119,9 +144,13 @@ export default function PaymentCompletedConfirmation({
               </div>
               
               <div>
-                <div className="text-sm text-gray-600 font-medium">Número de Boleto</div>
+                <div className="text-sm text-gray-600 font-medium">
+                  {paymentData.transactionType === 'LOST_TICKET' ? 'ID de Transacción' : 'Número de Boleto'}
+                </div>
                 <div className="text-lg font-mono text-gray-800 bg-white px-3 py-2 rounded border">
-                  {paymentData.ticketNumber}
+                  {paymentData.transactionType === 'LOST_TICKET' 
+                    ? paymentData.transactionId 
+                    : paymentData.ticketNumber}
                 </div>
               </div>
             </div>
@@ -153,7 +182,7 @@ export default function PaymentCompletedConfirmation({
                 <div>
                   <div className="text-sm text-gray-600 font-medium">Cambio</div>
                   <div className="text-xl font-bold text-orange-600 bg-orange-50 px-3 py-2 rounded border border-orange-200">
-                    {paymentData.changeGiven}
+                    {paymentData.changeGiven || '$0.00 MXN'}
                   </div>
                 </div>
               )}
@@ -183,7 +212,7 @@ export default function PaymentCompletedConfirmation({
             <div>
               <h4 className="text-xl font-bold text-orange-800">¡Entregar Cambio!</h4>
               <p className="text-lg text-orange-700">
-                Debe entregar <span className="font-bold">{paymentData.changeGiven}</span> al cliente
+                Debe entregar <span className="font-bold">{paymentData.changeGiven || '$0.00 MXN'}</span> al cliente
               </p>
             </div>
           </div>

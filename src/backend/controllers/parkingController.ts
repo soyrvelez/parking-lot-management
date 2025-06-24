@@ -1074,4 +1074,42 @@ export class ParkingController {
       throw error;
     }
   }
+
+  async getTicketsByPlate(req: Request, res: Response): Promise<void> {
+    try {
+      const { plateNumber } = req.params;
+
+      if (!plateNumber) {
+        res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_PLATE',
+            message: 'Número de placa requerido',
+            timestamp: new Date().toISOString()
+          }
+        });
+        return;
+      }
+
+      // Find tickets by plate number
+      const tickets = await prisma.ticket.findMany({
+        where: {
+          plateNumber: plateNumber.toUpperCase()
+        },
+        orderBy: {
+          entryTime: 'desc'
+        },
+        take: 10 // Limit to last 10 tickets
+      });
+
+      res.json({
+        success: true,
+        data: tickets,
+        timestamp: new Date().toISOString()
+      });
+
+    } catch (error) {
+      throw error;
+    }
+  }
 }

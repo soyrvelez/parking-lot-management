@@ -16,6 +16,7 @@ import { EventEmitter } from 'events';
 import { promises as fs } from 'fs';
 import { access, constants } from 'fs';
 import { promisify } from 'util';
+import { exec } from 'child_process';
 import { 
   PrinterConfig, 
   PrintJob, 
@@ -36,6 +37,8 @@ export class ThermalPrinterService extends EventEmitter {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private isProcessingQueue = false;
+  private isCupsPrinter = false;
+  private cupsPrinterName = '';
 
   constructor(config?: Partial<PrinterConfig>) {
     super();
@@ -44,7 +47,7 @@ export class ThermalPrinterService extends EventEmitter {
       interfaceType: config?.interfaceType || HARDWARE_CONSTANTS.PRINTER.DEFAULT_INTERFACE_TYPE,
       host: config?.host || HARDWARE_CONSTANTS.PRINTER.DEFAULT_HOST,
       port: config?.port || HARDWARE_CONSTANTS.PRINTER.DEFAULT_PORT,
-      devicePath: config?.devicePath || this.detectUSBDevice(),
+      devicePath: config?.devicePath || this.detectBestPrinterDevice(),
       timeout: config?.timeout || HARDWARE_CONSTANTS.PRINTER.DEFAULT_TIMEOUT,
       retryAttempts: config?.retryAttempts || HARDWARE_CONSTANTS.PRINTER.DEFAULT_RETRY_ATTEMPTS,
       retryDelay: config?.retryDelay || HARDWARE_CONSTANTS.PRINTER.DEFAULT_RETRY_DELAY,
@@ -74,21 +77,45 @@ export class ThermalPrinterService extends EventEmitter {
    */
   private initializePrinter(): void {
     try {
-      const interfaceString = this.config.interfaceType === 'usb' 
-        ? `printer:${this.config.devicePath}`
-        : `tcp://${this.config.host}:${this.config.port}`;
-
-      this.printer = new ThermalPrinter({
-        type: PrinterTypes.EPSON,
-        interface: interfaceString,
-        characterSet: CharacterSet.PC858_EURO,
-        removeSpecialCharacters: false,
-        lineCharacter: '-',
-        breakLine: BreakLine.WORD,
-        options: {
-          timeout: this.config.timeout
+      if (this.config.interfaceType === 'usb') {
+        // Check if this is a CUPS printer (macOS)
+        if (this.config.devicePath.startsWith('printer:')) {
+          this.isCupsPrinter = true;
+          this.cupsPrinterName = this.config.devicePath.replace('printer:', '');
+          // For CUPS printers, we'll handle printing differently
+          this.printer = null;
+        } else {
+          // Standard USB device path for Linux
+          this.isCupsPrinter = false;
+          const interfaceString = `printer:${this.config.devicePath}`;
+          this.printer = new ThermalPrinter({
+            type: PrinterTypes.EPSON,
+            interface: interfaceString,
+            characterSet: CharacterSet.PC858_EURO,
+            removeSpecialCharacters: false,
+            lineCharacter: '-',
+            breakLine: BreakLine.WORD,
+            options: {
+              timeout: this.config.timeout
+            }
+          });
         }
-      });
+      } else {
+        // TCP connection
+        this.isCupsPrinter = false;
+        const interfaceString = `tcp://${this.config.host}:${this.config.port}`;
+        this.printer = new ThermalPrinter({
+          type: PrinterTypes.EPSON,
+          interface: interfaceString,
+          characterSet: CharacterSet.PC858_EURO,
+          removeSpecialCharacters: false,
+          lineCharacter: '-',
+          breakLine: BreakLine.WORD,
+          options: {
+            timeout: this.config.timeout
+          }
+        });
+      }
 
       this.emit('printerInitialized');
     } catch (error) {
@@ -97,20 +124,35 @@ export class ThermalPrinterService extends EventEmitter {
   }
 
   /**
-   * Detect available USB thermal printer device
+   * Detect best printer device based on platform
+   */
+  private detectBestPrinterDevice(): string {
+    const platform = process.platform;
+    
+    if (platform === 'darwin') {
+      // macOS - prioritize CUPS printers
+      return 'printer:ThermalPrinter';
+    } else if (platform === 'linux') {
+      // Linux - prioritize USB devices
+      const linuxDevices = [
+        HARDWARE_CONSTANTS.PRINTER.USB_SYMLINK,     // /dev/thermal-printer (udev rule)
+        HARDWARE_CONSTANTS.PRINTER.DEFAULT_USB_DEVICE, // /dev/usb/lp0
+        HARDWARE_CONSTANTS.PRINTER.ALTERNATIVE_USB_DEVICE, // /dev/ttyUSB0
+        '/dev/lp0',  // Standard line printer
+        '/dev/lp1'   // Alternative line printer
+      ];
+      return linuxDevices[0];
+    } else {
+      // Windows or other - use network connection as fallback
+      return HARDWARE_CONSTANTS.PRINTER.DEFAULT_USB_DEVICE;
+    }
+  }
+
+  /**
+   * Detect available USB thermal printer device (legacy method)
    */
   private detectUSBDevice(): string {
-    // Try to detect USB printer devices in order of preference
-    const usbDevices = [
-      HARDWARE_CONSTANTS.PRINTER.USB_SYMLINK,     // /dev/thermal-printer (udev rule)
-      HARDWARE_CONSTANTS.PRINTER.DEFAULT_USB_DEVICE, // /dev/usb/lp0
-      HARDWARE_CONSTANTS.PRINTER.ALTERNATIVE_USB_DEVICE, // /dev/ttyUSB0
-      '/dev/lp0',  // Standard line printer
-      '/dev/lp1'   // Alternative line printer
-    ];
-
-    // Return the first available device (will be validated during connection)
-    return usbDevices[0];
+    return this.detectBestPrinterDevice();
   }
 
   /**
@@ -118,6 +160,20 @@ export class ThermalPrinterService extends EventEmitter {
    */
   private async checkUSBDevice(devicePath: string): Promise<boolean> {
     try {
+      // Handle CUPS printer on macOS
+      if (devicePath.startsWith('printer:')) {
+        // Check if CUPS printer exists by running lpstat
+        const { exec } = require('child_process');
+        const printerName = devicePath.replace('printer:', '');
+        
+        return new Promise((resolve) => {
+          exec(`lpstat -p ${printerName}`, (error: any) => {
+            resolve(!error);
+          });
+        });
+      }
+      
+      // Regular file system check for Linux devices
       await fs.access(devicePath, constants.R_OK | constants.W_OK);
       return true;
     } catch (error) {
@@ -130,6 +186,7 @@ export class ThermalPrinterService extends EventEmitter {
    */
   private async findUSBDevice(): Promise<string | null> {
     const usbDevices = [
+      'printer:ThermalPrinter',  // macOS CUPS printer (try first on macOS)
       HARDWARE_CONSTANTS.PRINTER.USB_SYMLINK,
       HARDWARE_CONSTANTS.PRINTER.DEFAULT_USB_DEVICE,
       HARDWARE_CONSTANTS.PRINTER.ALTERNATIVE_USB_DEVICE,
@@ -144,6 +201,24 @@ export class ThermalPrinterService extends EventEmitter {
     }
 
     return null;
+  }
+
+  /**
+   * Check if CUPS printer is available and ready
+   */
+  private async checkCupsPrinter(): Promise<boolean> {
+    return new Promise((resolve) => {
+      exec(`lpstat -p ${this.cupsPrinterName}`, (error, stdout) => {
+        if (error) {
+          resolve(false);
+        } else {
+          // Check if printer is idle and enabled
+          const isIdle = stdout.includes('idle');
+          const isEnabled = stdout.includes('enabled');
+          resolve(isIdle && isEnabled);
+        }
+      });
+    });
   }
 
   /**
@@ -182,26 +257,48 @@ export class ThermalPrinterService extends EventEmitter {
     let attempts = 0;
     while (attempts < this.config.retryAttempts) {
       try {
-        if (!this.printer) {
-          this.initializePrinter();
-        }
-
-        const isConnected = await this.printer!.isPrinterConnected();
-        if (isConnected) {
-          this.connectionState = 'CONNECTED';
-          this.status.connected = true;
-          this.status.online = true;
-          this.status.lastUpdate = new Date();
-          
-          this.emit('connected');
-          this.emit('statusUpdate', this.status);
-          
-          // Start processing queue if there are pending jobs
-          if (this.printQueue.length > 0) {
-            this.processQueue();
+        if (this.isCupsPrinter) {
+          // For CUPS printers, check using lpstat
+          const isConnected = await this.checkCupsPrinter();
+          if (isConnected) {
+            this.connectionState = 'CONNECTED';
+            this.status.connected = true;
+            this.status.online = true;
+            this.status.lastUpdate = new Date();
+            
+            this.emit('connected');
+            this.emit('statusUpdate', this.status);
+            
+            // Start processing queue if there are pending jobs
+            if (this.printQueue.length > 0) {
+              this.processQueue();
+            }
+            
+            return true;
           }
-          
-          return true;
+        } else {
+          // Standard thermal printer library
+          if (!this.printer) {
+            this.initializePrinter();
+          }
+
+          const isConnected = await this.printer!.isPrinterConnected();
+          if (isConnected) {
+            this.connectionState = 'CONNECTED';
+            this.status.connected = true;
+            this.status.online = true;
+            this.status.lastUpdate = new Date();
+            
+            this.emit('connected');
+            this.emit('statusUpdate', this.status);
+            
+            // Start processing queue if there are pending jobs
+            if (this.printQueue.length > 0) {
+              this.processQueue();
+            }
+            
+            return true;
+          }
         }
       } catch (error) {
         attempts++;
@@ -331,6 +428,22 @@ export class ThermalPrinterService extends EventEmitter {
   }
 
   /**
+   * Print partner business ticket
+   */
+  public async printPartnerTicket(ticketData: any): Promise<boolean> {
+    const content = this.formatPartnerTicket(ticketData);
+    return this.addToPrintQueue({
+      id: `PARTNER_${ticketData.ticketNumber}_${Date.now()}`,
+      type: 'ENTRY_TICKET', // Use existing type that works
+      content,
+      priority: 'HIGH',
+      createdAt: new Date(),
+      attempts: 0,
+      status: 'PENDING'
+    });
+  }
+
+  /**
    * Format entry ticket with Spanish template
    */
   private formatEntryTicket(data: ReceiptData): string {
@@ -350,8 +463,17 @@ export class ThermalPrinterService extends EventEmitter {
     
     // Entry time (if available)
     if (data.entryTime) {
+      // DEBUG: Log the actual date being formatted
+      console.log('🔍 DEBUG: Entry time raw:', data.entryTime);
+      console.log('🔍 DEBUG: Entry time type:', typeof data.entryTime);
+      
+      // Ensure we have a proper Date object in Mexico City timezone
+      const entryDate = new Date(data.entryTime);
+      console.log('🔍 DEBUG: Entry date parsed:', entryDate);
+      console.log('🔍 DEBUG: Entry date formatted:', i18n.formatDateTime(entryDate));
+      
       lines.push(i18n.t('receipt.entry_time', { 
-        time: i18n.formatDateTime(data.entryTime) 
+        time: i18n.formatDateTime(entryDate) 
       }));
     }
     lines.push('');
@@ -361,8 +483,18 @@ export class ThermalPrinterService extends EventEmitter {
     lines.push(this.centerText(i18n.t('customer.welcome')));
     lines.push('');
     
-    // Barcode placeholder (Code 39)
-    lines.push(this.centerText('||| ' + data.ticketNumber + ' |||'));
+    // Real barcode (Code 39 format) - use the provided barcode field
+    if (data.barcode) {
+      console.log('🔍 DEBUG: Adding barcode pattern for ESC/POS conversion:', data.barcode);
+      // Add the *BARCODE* pattern - this will be converted to actual barcode commands by processBarcodes()
+      lines.push(this.centerText(`*${data.barcode}*`));
+      // Don't add plain text here - the barcode processor will add it automatically
+    } else {
+      // Fallback to ticket number if no barcode provided
+      console.log('🔍 DEBUG: No barcode, using ticket number:', data.ticketNumber);
+      lines.push(this.centerText(`*${data.ticketNumber}*`));
+      // Don't add plain text here - the barcode processor will add it automatically
+    }
     lines.push('');
     
     // Footer
@@ -527,6 +659,66 @@ export class ThermalPrinterService extends EventEmitter {
   }
 
   /**
+   * Format partner business ticket with Spanish template
+   */
+  private formatPartnerTicket(data: any): string {
+    const lines: string[] = [];
+    
+    // Header
+    lines.push(this.centerText('='.repeat(this.config.paperWidth)));
+    lines.push(this.centerText(i18n.t('receipt.parking_title')));
+    lines.push(this.centerText('*** BOLETO DE SOCIO ***'));
+    lines.push(this.centerText('='.repeat(this.config.paperWidth)));
+    lines.push('');
+    
+    // Partner Business Info
+    lines.push(`Socio: ${data.partnerName}`);
+    lines.push(`Tipo: ${data.businessType}`);
+    lines.push('-'.repeat(this.config.paperWidth));
+    
+    // Vehicle and Entry Info
+    lines.push(`Placa: ${data.plateNumber}`);
+    lines.push(`Entrada: ${data.entryTime}`);
+    
+    // Customer info if provided
+    if (data.customerName) {
+      lines.push(`Cliente: ${data.customerName}`);
+    }
+    lines.push('');
+    
+    // Pricing Information
+    lines.push(`Tarifa: ${data.rate}`);
+    if (data.maxHours) {
+      lines.push(`Válido: ${data.maxHours}`);
+    }
+    lines.push('-'.repeat(this.config.paperWidth));
+    
+    // Barcode (Code 39) - using standard format for ESC/POS processing
+    lines.push(this.centerText(`*${data.barcode}*`));
+    lines.push('-'.repeat(this.config.paperWidth));
+    
+    // Special instructions
+    if (data.specialInstructions) {
+      lines.push(this.centerText('INSTRUCCIONES ESPECIALES:'));
+      lines.push(this.centerText(data.specialInstructions));
+      lines.push('');
+    }
+    
+    // Footer
+    lines.push(this.centerText('*** IMPORTANTE ***'));
+    lines.push(this.centerText('SOLICITE SELLO DEL NEGOCIO'));
+    lines.push(this.centerText('SIN SELLO = TARIFA REGULAR'));
+    lines.push('');
+    lines.push(this.centerText('Conserve su boleto'));
+    if (data.specialInstructions) {
+      lines.push(this.centerText('Válido solo con compra'));
+    }
+    lines.push(this.centerText('='.repeat(this.config.paperWidth)));
+    
+    return lines.join(HARDWARE_CONSTANTS.PRINTER.LINE_SEPARATOR);
+  }
+
+  /**
    * Center text within paper width
    */
   private centerText(text: string): string {
@@ -608,37 +800,234 @@ export class ThermalPrinterService extends EventEmitter {
   }
 
   /**
+   * Format content with ESC/POS commands for thermal printer
+   */
+  private formatContentForThermalPrinter(content: string): string {
+    const ESC = '\x1B';
+    const GS = '\x1D';
+    const LF = '\n';
+    
+    let formatted = '';
+    
+    // Initialize printer
+    formatted += ESC + '@';  // ESC @ - Initialize printer
+    
+    // Set character set for Spanish characters
+    formatted += ESC + 'R' + '\x0C';  // ESC R 12 - Set character set to Latin
+    
+    // Process content and convert barcode patterns to ESC/POS commands
+    let processedContent = this.processBarcodes(content);
+    formatted += processedContent;
+    
+    // Add feed lines
+    formatted += LF + LF + LF;
+    
+    // Cut paper
+    formatted += GS + 'V' + '\x41' + '\x00';  // GS V 65 0 - Full cut
+    
+    return formatted;
+  }
+
+  /**
+   * Process content to convert barcode patterns to ESC/POS barcode commands
+   * CRITICAL: Places barcodes at document START for proper printer interpretation
+   */
+  private processBarcodes(content: string): string {
+    const GS = '\x1D';
+    const LF = '\n';
+    
+    console.log('🔍 DEBUG: processBarcodes input content length:', content.length);
+    console.log('🔍 DEBUG: processBarcodes input contains asterisk patterns:', content.includes('*'));
+    
+    // Extract all barcode patterns first
+    const barcodeMatches: Array<{match: string, data: string}> = [];
+    content.replace(/\*([A-Z0-9\-]+)\*/g, (match, barcodeData) => {
+      barcodeMatches.push({match, data: barcodeData});
+      console.log('🔍 DEBUG: Found barcode pattern:', barcodeData);
+      return match; // Don't modify yet
+    });
+    
+    if (barcodeMatches.length === 0) {
+      return content; // No barcodes to process
+    }
+    
+    // Build barcode commands section (goes at the BEGINNING after init)
+    let barcodeSection = '';
+    for (const barcode of barcodeMatches) {
+      console.log('🔍 DEBUG: Converting barcode to ESC/POS:', barcode.data);
+      
+      // Use the WORKING format from Test 3: GS k 4 *DATA* NULL
+      barcodeSection += GS + 'k' + '\x04' + '*' + barcode.data + '*' + '\x00';
+      barcodeSection += LF + LF; // Extra space after barcode
+      barcodeSection += barcode.data + LF; // Human readable
+      barcodeSection += LF; // Extra spacing
+      
+      console.log('🔍 DEBUG: Generated barcode command hex:', 
+        Buffer.from(GS + 'k' + '\x04' + '*' + barcode.data + '*' + '\x00', 'latin1').toString('hex'));
+    }
+    
+    // Remove barcode patterns from original content completely
+    let cleanContent = content;
+    for (const barcode of barcodeMatches) {
+      cleanContent = cleanContent.replace(barcode.match, '');
+    }
+    
+    // Combine: original content with barcode section INSERTED at strategic position
+    // Find a good insertion point (after header but before main content)
+    const headerEnd = cleanContent.indexOf('\n\n');
+    if (headerEnd !== -1) {
+      // Insert after header section
+      const beforeContent = cleanContent.substring(0, headerEnd + 2);
+      const afterContent = cleanContent.substring(headerEnd + 2);
+      const result = beforeContent + barcodeSection + afterContent;
+      
+      console.log('🔍 DEBUG: Barcode section inserted after header');
+      console.log('🔍 DEBUG: processBarcodes output length:', result.length);
+      return result;
+    } else {
+      // Fallback: prepend barcode section
+      const result = barcodeSection + cleanContent;
+      console.log('🔍 DEBUG: Barcode section prepended to content');
+      console.log('🔍 DEBUG: processBarcodes output length:', result.length);
+      return result;
+    }
+  }
+
+  /**
+   * Try direct device writing as fallback (macOS)
+   */
+  private async tryDirectDeviceWrite(content: string): Promise<boolean> {
+    // Check for common macOS USB printer device paths
+    const possibleDevices = [
+      '/dev/tty.usbmodem*',
+      '/dev/cu.usbmodem*',
+      '/dev/tty.usbserial*',
+      '/dev/cu.usbserial*'
+    ];
+    
+    for (const devicePattern of possibleDevices) {
+      try {
+        // Use shell globbing to find actual device
+        const { stdout } = await promisify(exec)(`ls ${devicePattern} 2>/dev/null | head -1`);
+        const device = stdout.trim();
+        
+        if (device) {
+          await fs.writeFile(device, content, 'binary');
+          return true;
+        }
+      } catch (error) {
+        // Continue to next device pattern
+        continue;
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Execute print job using CUPS with raw printing (macOS)
+   */
+  private async executeJobCups(job: PrintJob): Promise<boolean> {
+    return new Promise((resolve) => {
+      // Create ESC/POS formatted content for thermal printer
+      const escPosContent = this.formatContentForThermalPrinter(job.content);
+      const tempFile = `/tmp/parking-print-${Date.now()}.prn`;
+      
+      // DEBUG: Log what we're trying to print
+      console.log('🔍 DEBUG: Original job content:', JSON.stringify(job.content));
+      console.log('🔍 DEBUG: Processed ESC/POS content length:', escPosContent.length);
+      console.log('🔍 DEBUG: ESC/POS content (first 200 chars):', 
+        escPosContent.substring(0, 200).replace(/[\x00-\x1F]/g, (m) => `\\x${m.charCodeAt(0).toString(16).padStart(2, '0')}`));
+      console.log('🔍 DEBUG: Temp file:', tempFile);
+      
+      fs.writeFile(tempFile, Buffer.from(escPosContent, 'latin1'))
+        .then(() => {
+          // Use lpr with raw option to bypass CUPS formatting
+          // DEBUG: Save a copy before printing
+          const debugFile = `/tmp/debug-barcode-${Date.now()}.prn`;
+          exec(`cp "${tempFile}" "${debugFile}"`, () => {
+            console.log('🔍 DEBUG: Saved copy to:', debugFile);
+          });
+          
+          exec(`lpr -P ${this.cupsPrinterName} -o raw "${tempFile}"`, (error, stdout, stderr) => {
+            // Clean up temp file (but keep debug copy)
+            fs.unlink(tempFile).catch(() => {}); // Ignore cleanup errors
+            
+            if (error) {
+              // Try alternative method - direct device writing if available
+              this.tryDirectDeviceWrite(escPosContent)
+                .then((success) => {
+                  if (success) {
+                    this.emit('printJobExecuted', job);
+                    resolve(true);
+                  } else {
+                    this.handleError('PRINTER', 'CUPS_PRINT_FAILED', `CUPS print failed: ${error.message}`, error);
+                    resolve(false);
+                  }
+                })
+                .catch(() => {
+                  this.handleError('PRINTER', 'CUPS_PRINT_FAILED', `CUPS print failed: ${error.message}`, error);
+                  resolve(false);
+                });
+            } else {
+              this.emit('printJobExecuted', job);
+              resolve(true);
+            }
+          });
+        })
+        .catch((error) => {
+          this.handleError('PRINTER', 'FILE_WRITE_ERROR', `Failed to write temp file: ${error.message}`, error);
+          resolve(false);
+        });
+    });
+  }
+
+  /**
    * Execute individual print job
    */
   private async executeJob(job: PrintJob): Promise<boolean> {
-    if (!this.printer || !this.status.connected) {
+    if (!this.status.connected) {
       return false;
     }
 
     try {
-      // Clear printer buffer
-      this.printer.clear();
+      console.log('🔍 DEBUG: executeJob called, isCupsPrinter:', this.isCupsPrinter);
+      console.log('🔍 DEBUG: job:', JSON.stringify(job, null, 2));
       
-      // Set character encoding for Spanish characters
-      this.printer.setCharacterSet(CharacterSet.PC858_EURO);
-      
-      // Print content
-      this.printer.println(job.content);
-      
-      // Add feed lines and cut
-      for (let i = 0; i < HARDWARE_CONSTANTS.PRINTER.FEED_LINES; i++) {
-        this.printer.newLine();
-      }
-      
-      // Execute print
-      const success = await this.printer.execute();
-      
-      if (success) {
-        this.emit('printJobExecuted', job);
-        return true;
+      if (this.isCupsPrinter) {
+        // Use CUPS printing for macOS
+        console.log('🔍 DEBUG: Using CUPS printing path');
+        return await this.executeJobCups(job);
       } else {
-        this.handleError('PRINTER', 'PRINT_FAILED', i18n.t('hardware.print_failed'));
-        return false;
+        // Use standard thermal printer library
+        if (!this.printer) {
+          return false;
+        }
+
+        // Clear printer buffer
+        this.printer.clear();
+        
+        // Set character encoding for Spanish characters
+        this.printer.setCharacterSet(CharacterSet.PC858_EURO);
+        
+        // Print content
+        this.printer.println(job.content);
+        
+        // Add feed lines and cut
+        for (let i = 0; i < HARDWARE_CONSTANTS.PRINTER.FEED_LINES; i++) {
+          this.printer.newLine();
+        }
+        
+        // Execute print
+        const success = await this.printer.execute();
+        
+        if (success) {
+          this.emit('printJobExecuted', job);
+          return true;
+        } else {
+          this.handleError('PRINTER', 'PRINT_FAILED', i18n.t('hardware.print_failed'));
+          return false;
+        }
       }
     } catch (error) {
       this.handleError('PRINTER', 'EXECUTION_ERROR', i18n.t('hardware.execution_error'), error);

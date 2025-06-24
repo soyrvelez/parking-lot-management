@@ -12,6 +12,7 @@ import cashRoutes from './routes/cashRoutes';
 import { authRoutes } from './routes/auth';
 import { operatorRoutes } from './routes/operator';
 import { pensionRoutes } from './routes/pension';
+import partnerRoutes from './routes/partner';
 import { i18n } from '../shared/localization';
 
 const app = express();
@@ -85,6 +86,7 @@ app.use('/api/operator', operatorRoutes); // No auth required - for locked-down 
 app.use('/api/parking', parkingRoutes); // No auth required - operator functionality
 app.use('/api/pension', pensionRoutes); // No auth required - pension customer management
 app.use('/api/admin', authMiddleware, adminRoutes); // All admin routes require authentication
+app.use('/api/partner', partnerRoutes); // Partner routes have selective authentication
 app.use('/api/hardware', hardwareRoutes); // No auth required - operator workstations need printer access
 app.use('/api/cash', cashRoutes);
 

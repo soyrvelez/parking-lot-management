@@ -1,16 +1,17 @@
 import { useState, useEffect } from 'react';
-import { DollarSign, Car, AlertCircle, RefreshCw, TrendingUp, TrendingDown } from 'lucide-react';
+import { DollarSign, Car, AlertCircle, RefreshCw, TrendingUp, TrendingDown, Building2 } from 'lucide-react';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import moment from 'moment-timezone';
 import Decimal from 'decimal.js';
 
 interface Transaction {
   id: string;
-  type: 'PARKING' | 'PENSION' | 'LOST_TICKET' | 'REFUND';
+  type: 'PARKING' | 'PENSION' | 'PARTNER' | 'LOST_TICKET' | 'REFUND';
   amount: string;
   plateNumber?: string;
   timestamp: string;
   description?: string;
+  partnerName?: string;
 }
 
 interface RecentTransactionsData {
@@ -49,9 +50,10 @@ export default function RecentTransactions() {
             id: transaction.id,
             type: transaction.type,
             amount: transaction.amount,
-            plateNumber: transaction.ticket?.plateNumber || transaction.pension?.plateNumber,
+            plateNumber: transaction.ticket?.plateNumber || transaction.pension?.plateNumber || transaction.partnerTicket?.plateNumber,
             timestamp: transaction.timestamp,
-            description: transaction.description
+            description: transaction.description,
+            partnerName: transaction.partnerTicket?.partnerBusiness?.name
           }));
 
           // Calculate summary stats
@@ -94,6 +96,7 @@ export default function RecentTransactions() {
     switch (type) {
       case 'PARKING': return Car;
       case 'PENSION': return TrendingUp;
+      case 'PARTNER': return Building2;
       case 'LOST_TICKET': return AlertCircle;
       case 'REFUND': return TrendingDown;
       default: return DollarSign;
@@ -104,6 +107,7 @@ export default function RecentTransactions() {
     switch (type) {
       case 'PARKING': return 'text-green-600 bg-green-100';
       case 'PENSION': return 'text-blue-600 bg-blue-100';
+      case 'PARTNER': return 'text-purple-600 bg-purple-100';
       case 'LOST_TICKET': return 'text-yellow-600 bg-yellow-100';
       case 'REFUND': return 'text-red-600 bg-red-100';
       default: return 'text-gray-600 bg-gray-100';
@@ -114,6 +118,7 @@ export default function RecentTransactions() {
     switch (type) {
       case 'PARKING': return 'Estacionamiento';
       case 'PENSION': return 'Pensión';
+      case 'PARTNER': return 'Socio Comercial';
       case 'LOST_TICKET': return 'Boleto Perdido';
       case 'REFUND': return 'Reembolso';
       default: return type;
@@ -199,6 +204,9 @@ export default function RecentTransactions() {
                     <div className="text-xs sm:text-sm text-gray-500 truncate">
                       {transaction.plateNumber && (
                         <span className="font-mono">{transaction.plateNumber} • </span>
+                      )}
+                      {transaction.type === 'PARTNER' && transaction.partnerName && (
+                        <span className="text-purple-600 font-medium">{transaction.partnerName} • </span>
                       )}
                       {moment.tz(transaction.timestamp, 'America/Mexico_City').format('HH:mm')}
                     </div>

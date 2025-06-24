@@ -4,6 +4,7 @@ interface KeyboardShortcuts {
   onScanMode?: () => void;
   onEntryMode?: () => void;
   onPensionMode?: () => void;
+  onLostTicketMode?: () => void;
   onPaymentMode?: () => void;
   onConfirmPayment?: () => void;
   onClearAmount?: () => void;
@@ -40,6 +41,11 @@ export const useKeyboardShortcuts = (shortcuts: KeyboardShortcuts) => {
         case 'F3':
           event.preventDefault();
           shortcuts.onPensionMode?.();
+          break;
+        
+        case 'F4':
+          event.preventDefault();
+          shortcuts.onLostTicketMode?.();
           break;
         
         case 'F4':

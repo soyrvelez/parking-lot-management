@@ -1,20 +1,25 @@
 import { useState } from 'react';
-import { Car, Scan, DollarSign, FileText, Users, Activity, Clock } from 'lucide-react';
+import { Car, Scan, DollarSign, FileText, Users, Activity, Clock, Building2 } from 'lucide-react';
 import ScanSection from '../components/operator/ScanSection';
 import EntrySection from '../components/operator/EntrySection';
 import PaymentSection from '../components/operator/PaymentSection';
 import PensionSection from '../components/operator/PensionSection';
+import PartnerSection from '../components/operator/PartnerSection';
+import PartnerPaymentSection from '../components/operator/PartnerPaymentSection';
+import { LostTicketSection } from '../components/operator/PaymentSection';
 import TicketCreatedConfirmation from '../components/operator/TicketCreatedConfirmation';
 import PaymentCompletedConfirmation from '../components/operator/PaymentCompletedConfirmation';
 import StatusDisplay from '../components/operator/StatusDisplay';
 import HardwareStatusIndicator from '../components/operator/HardwareStatusIndicator';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
+import UnifiedPaymentSection from '../components/operator/UnifiedPaymentSection';
 
-type ViewType = 'scan' | 'entry' | 'payment' | 'pension' | 'ticket-created' | 'payment-completed';
+type ViewType = 'scan' | 'entry' | 'payment' | 'pension' | 'partner' | 'partner-payment' | 'lost-ticket' | 'ticket-created' | 'payment-completed' | 'unified-payment';
 
 export default function OperatorInterface() {
   const [currentView, setCurrentView] = useState<ViewType>('entry');
   const [currentTicket, setCurrentTicket] = useState<any>(null);
+  const [currentPartnerTicket, setCurrentPartnerTicket] = useState<any>(null);
   const [currentPensionCustomer, setCurrentPensionCustomer] = useState<any>(null);
   const [createdTicketData, setCreatedTicketData] = useState<any>(null);
   const [paymentCompletedData, setPaymentCompletedData] = useState<any>(null);
@@ -35,6 +40,11 @@ export default function OperatorInterface() {
     onPensionMode: () => {
       if (currentView !== 'ticket-created' && currentView !== 'payment-completed') {
         setCurrentView('pension');
+      }
+    },
+    onLostTicketMode: () => {
+      if (currentView !== 'ticket-created' && currentView !== 'payment-completed') {
+        setCurrentView('lost-ticket');
       }
     },
     onPaymentMode: () => {
@@ -75,17 +85,17 @@ export default function OperatorInterface() {
               </button>
             
             <button
-              onClick={() => setCurrentView('scan')}
+              onClick={() => setCurrentView('unified-payment')}
               className={`px-3 sm:px-6 lg:px-8 py-3 sm:py-4 text-sm sm:text-lg font-medium rounded-t-lg transition-colors flex-shrink-0 ${
-                currentView === 'scan'
+                currentView === 'unified-payment' || currentView === 'payment' || currentView === 'partner-payment'
                   ? 'bg-blue-50 text-blue-700 border-b-2 border-blue-700'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
               <div className="flex items-center gap-2 sm:gap-3">
-                <Scan className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6" />
-                <span className="hidden sm:inline">Escanear</span>
-                <span className="sm:hidden">Scan</span>
+                <DollarSign className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6" />
+                <span className="hidden sm:inline">Cobrar</span>
+                <span className="sm:hidden">Cobrar</span>
               </div>
             </button>
 
@@ -100,6 +110,21 @@ export default function OperatorInterface() {
               <div className="flex items-center gap-2 sm:gap-3">
                 <Users className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6" />
                 Pensión
+              </div>
+            </button>
+
+            <button
+              onClick={() => setCurrentView('partner')}
+              className={`px-3 sm:px-6 lg:px-8 py-3 sm:py-4 text-sm sm:text-lg font-medium rounded-t-lg transition-colors flex-shrink-0 ${
+                currentView === 'partner'
+                  ? 'bg-purple-50 text-purple-700 border-b-2 border-purple-700'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              <div className="flex items-center gap-2 sm:gap-3">
+                <Building2 className="w-4 h-4 sm:w-5 sm:h-5 lg:w-6 lg:h-6" />
+                <span className="hidden sm:inline">Socio Comercial</span>
+                <span className="sm:hidden">Socio</span>
               </div>
             </button>
 
@@ -131,6 +156,10 @@ export default function OperatorInterface() {
                   setCurrentTicket(ticket);
                   setCurrentView('payment');
                 }}
+                onPartnerTicketFound={(partnerTicket) => {
+                  setCurrentPartnerTicket(partnerTicket);
+                  setCurrentView('partner-payment');
+                }}
                 onPensionCustomerFound={(customer) => {
                   setCurrentPensionCustomer(customer);
                   setCurrentView('pension');
@@ -146,6 +175,16 @@ export default function OperatorInterface() {
                   setCurrentView('ticket-created');
                 }}
                 onBack={() => setCurrentView('entry')} // Nueva Entrada is the home page
+              />
+            )}
+
+            {currentView === 'unified-payment' && (
+              <UnifiedPaymentSection 
+                onPaymentComplete={(paymentData) => {
+                  setPaymentCompletedData(paymentData);
+                  setCurrentView('payment-completed');
+                }}
+                onBack={() => setCurrentView('entry')}
               />
             )}
             
@@ -192,6 +231,41 @@ export default function OperatorInterface() {
             {currentView === 'pension' && (
               <PensionSection 
                 onBack={() => setCurrentView('entry')} // Return to Nueva Entrada from pension
+              />
+            )}
+
+            {currentView === 'partner' && (
+              <PartnerSection 
+                onTicketCreated={(ticket) => {
+                  setCreatedTicketData(ticket);
+                  setCurrentView('ticket-created');
+                }}
+              />
+            )}
+
+            {currentView === 'partner-payment' && currentPartnerTicket && (
+              <PartnerPaymentSection 
+                partnerTicket={currentPartnerTicket}
+                onPaymentComplete={(paymentData) => {
+                  setPaymentCompletedData(paymentData);
+                  setCurrentPartnerTicket(null);
+                  setCurrentView('payment-completed');
+                }}
+                onBack={() => setCurrentView('scan')} // Back goes to scan when in partner payment
+              />
+            )}
+
+            {currentView === 'lost-ticket' && (
+              <LostTicketSection 
+                onSuccess={(data) => {
+                  // Handle successful lost ticket processing - show confirmation screen
+                  setPaymentCompletedData(data);
+                  setCurrentView('payment-completed');
+                }}
+                onError={(error) => {
+                  // Error handling is done within the component
+                  console.error('Lost ticket error:', error);
+                }}
               />
             )}
           </div>

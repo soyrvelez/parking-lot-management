@@ -106,8 +106,21 @@ export class IdGenerator {
 
   /**
    * Generate barcode (ticket-specific format)
+   * For partner tickets, uses shorter format to fit Code 39 length limits (max 10 chars)
    */
   public generateBarcode(ticketId: string, plateNumber: string): string {
+    // For partner tickets (PT-timestamp-id), create shorter barcode max 10 chars
+    if (ticketId.startsWith('PT-')) {
+      // Extract just the short ID part and first 3 chars of plate for 10-char limit
+      const parts = ticketId.split('-');
+      if (parts.length >= 3) {
+        const shortId = parts[2].substring(0, 6); // e.g., "188uaw" -> "188uaw" (6 chars)
+        const shortPlate = plateNumber.substring(0, 3); // e.g., "VERIFY" -> "VER" (3 chars)
+        return `P${shortId}${shortPlate}`.toUpperCase(); // e.g., "P188UAWVER" (10 chars)
+      }
+    }
+    
+    // Standard format for regular tickets
     return `${ticketId}-${plateNumber}`.toUpperCase();
   }
 

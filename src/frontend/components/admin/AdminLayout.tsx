@@ -14,7 +14,8 @@ import {
   Car,
   Home,
   Shield,
-  Clock
+  Clock,
+  Building2
 } from 'lucide-react';
 import AdminErrorBoundary from './AdminErrorBoundary';
 import { useAdminAuth } from '../../hooks/useAdminAuth';
@@ -41,6 +42,12 @@ const navigation = [
     href: '/admin/tickets',
     icon: Car,
     description: 'Gestión de vehículos en el lote'
+  },
+  {
+    name: 'Socios Comerciales',
+    href: '/admin/partners',
+    icon: Building2,
+    description: 'Gestión de negocios asociados'
   },
   {
     name: 'Caja Registradora',

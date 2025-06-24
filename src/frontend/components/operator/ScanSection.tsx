@@ -3,11 +3,12 @@ import { Scan, AlertCircle, Clock, CheckCircle } from 'lucide-react';
 
 interface ScanSectionProps {
   onTicketFound: (ticket: any) => void;
+  onPartnerTicketFound: (ticket: any) => void;
   onPensionCustomerFound: (customer: any) => void;
   onSwitchToEntry: () => void;
 }
 
-export default function ScanSection({ onTicketFound, onPensionCustomerFound, onSwitchToEntry }: ScanSectionProps) {
+export default function ScanSection({ onTicketFound, onPartnerTicketFound, onPensionCustomerFound, onSwitchToEntry }: ScanSectionProps) {
   const [scannedCode, setScannedCode] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [error, setError] = useState('');
@@ -75,6 +76,20 @@ export default function ScanSection({ onTicketFound, onPensionCustomerFound, onS
         console.log('Found ticket data:', result.data);
         setTimeout(() => {
           onTicketFound(result.data);
+        }, 500); // Brief delay for user feedback
+        return;
+      }
+      
+      // If not found, try partner ticket lookup
+      response = await fetch(`/api/partner/tickets/lookup/${scannedCode}`);
+      result = await response.json();
+      
+      if (response.ok && result.data) {
+        // Found partner ticket
+        setSuccess('¡Boleto de socio encontrado!');
+        console.log('Found partner ticket data:', result.data);
+        setTimeout(() => {
+          onPartnerTicketFound(result.data);
         }, 500); // Brief delay for user feedback
         return;
       }

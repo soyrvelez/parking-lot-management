@@ -1,18 +1,19 @@
 import { useState, useEffect } from 'react';
-import { Search, Filter, Calendar, DollarSign, Car, AlertCircle, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Filter, Calendar, DollarSign, Car, AlertCircle, RefreshCw, ChevronLeft, ChevronRight, Building2, TrendingUp, TrendingDown } from 'lucide-react';
 import moment from 'moment-timezone';
 import Decimal from 'decimal.js';
 import { useAdminAuth } from '../../../hooks/useAdminAuth';
 
 interface Transaction {
   id: string;
-  type: 'PARKING' | 'PENSION' | 'LOST_TICKET' | 'REFUND';
+  type: 'PARKING' | 'PENSION' | 'PARTNER' | 'LOST_TICKET' | 'REFUND';
   amount: string;
   plateNumber?: string;
   timestamp: string;
   description?: string;
   operatorId?: string;
   ticketId?: string;
+  partnerName?: string;
 }
 
 interface TransactionHistoryData {
@@ -105,9 +106,10 @@ export default function TransactionHistory({ filters }: TransactionHistoryProps)
   const getTransactionIcon = (type: string) => {
     switch (type) {
       case 'PARKING': return Car;
-      case 'PENSION': return Calendar;
+      case 'PENSION': return TrendingUp;
+      case 'PARTNER': return Building2;
       case 'LOST_TICKET': return AlertCircle;
-      case 'REFUND': return DollarSign;
+      case 'REFUND': return TrendingDown;
       default: return DollarSign;
     }
   };
@@ -116,6 +118,7 @@ export default function TransactionHistory({ filters }: TransactionHistoryProps)
     switch (type) {
       case 'PARKING': return 'text-green-600 bg-green-100';
       case 'PENSION': return 'text-blue-600 bg-blue-100';
+      case 'PARTNER': return 'text-purple-600 bg-purple-100';
       case 'LOST_TICKET': return 'text-yellow-600 bg-yellow-100';
       case 'REFUND': return 'text-red-600 bg-red-100';
       default: return 'text-gray-600 bg-gray-100';
@@ -126,6 +129,7 @@ export default function TransactionHistory({ filters }: TransactionHistoryProps)
     switch (type) {
       case 'PARKING': return 'Estacionamiento';
       case 'PENSION': return 'Pensión';
+      case 'PARTNER': return 'Socio Comercial';
       case 'LOST_TICKET': return 'Boleto Perdido';
       case 'REFUND': return 'Reembolso';
       default: return type;
@@ -255,6 +259,9 @@ export default function TransactionHistory({ filters }: TransactionHistoryProps)
                       <div className="text-sm text-gray-500">
                         {transaction.plateNumber && (
                           <span className="font-mono">{transaction.plateNumber} • </span>
+                        )}
+                        {transaction.type === 'PARTNER' && transaction.partnerName && (
+                          <span className="text-purple-600 font-medium">{transaction.partnerName} • </span>
                         )}
                         ID: {transaction.id.slice(-8)}
                       </div>

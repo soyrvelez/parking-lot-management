@@ -139,8 +139,14 @@ export interface TranslationKey {
     print_failed: string;
     execution_error: string;
     health_check_failed: string;
+    printer_init_failed: string;
     test_print: string;
     test_successful: string;
+    usb_device_not_found: string;
+    usb_permission_denied: string;
+    usb_device_busy: string;
+    usb_communication_error: string;
+    usb_device_disconnected: string;
     scan_already_active: string;
     empty_scan_buffer: string;
     invalid_barcode: string;

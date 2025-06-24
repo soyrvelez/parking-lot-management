@@ -188,7 +188,7 @@ export class AdminController {
             gte: startOfDay,
             lt: endOfDay
           },
-          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION'] }
+          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION', 'PARTNER'] }
         },
         _sum: { amount: true },
         _count: true
@@ -235,7 +235,7 @@ export class AdminController {
             gte: startOfDay,
             lt: endOfDay
           },
-          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION'] }
+          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION', 'PARTNER'] }
         }
       });
 
@@ -359,7 +359,7 @@ export class AdminController {
             gte: reportStartDate,
             lt: reportEndDate
           },
-          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION'] }
+          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION', 'PARTNER'] }
         },
         _sum: { amount: true },
         _count: true
@@ -377,7 +377,7 @@ export class AdminController {
             gte: reportStartDate,
             lt: reportEndDate
           },
-          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION'] }
+          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION', 'PARTNER'] }
         },
         _sum: { amount: true },
         _count: true
@@ -1080,14 +1080,14 @@ export class AdminController {
       prisma.transaction.aggregate({
         where: {
           timestamp: { gte: startDate, lt: endDate },
-          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION'] }
+          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION', 'PARTNER'] }
         },
         _sum: { amount: true }
       }),
       prisma.transaction.count({
         where: {
           timestamp: { gte: startDate, lt: endDate },
-          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION'] }
+          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION', 'PARTNER'] }
         }
       }),
       prisma.ticket.count({
@@ -1247,6 +1247,19 @@ export class AdminController {
               name: true,
               plateNumber: true
             }
+          },
+          partnerTicket: {
+            select: {
+              plateNumber: true,
+              customerName: true,
+              agreedRate: true,
+              partnerBusiness: {
+                select: {
+                  name: true,
+                  businessType: true
+                }
+              }
+            }
           }
         }
       });
@@ -1264,6 +1277,13 @@ export class AdminController {
           plateNumber: transaction.pension.plateNumber
         } : null;
 
+        const partnerInfo = transaction.partnerTicket ? {
+          plateNumber: transaction.partnerTicket.plateNumber,
+          customerName: transaction.partnerTicket.customerName,
+          agreedRate: transaction.partnerTicket.agreedRate,
+          partnerBusiness: transaction.partnerTicket.partnerBusiness
+        } : null;
+
         return {
           id: transaction.id,
           type: transaction.type,
@@ -1273,7 +1293,8 @@ export class AdminController {
           operatorId: transaction.operatorId,
           paymentMethod: transaction.paymentMethod || 'CASH',
           ticket: ticketInfo,
-          pension: pensionInfo
+          pension: pensionInfo,
+          partnerTicket: partnerInfo
         };
       });
 
@@ -1322,11 +1343,12 @@ export class AdminController {
       }
 
       // Build transaction type filter
-      let typeFilter: string[] = ['PARKING', 'PENSION', 'LOST_TICKET'];
+      let typeFilter: string[] = ['PARKING', 'PENSION', 'PARTNER', 'LOST_TICKET'];
       if (transactionType && transactionType !== 'all') {
         switch (transactionType) {
           case 'parking': typeFilter = ['PARKING']; break;
           case 'pension': typeFilter = ['PENSION']; break;
+          case 'partner': typeFilter = ['PARTNER']; break;
           case 'lost_ticket': typeFilter = ['LOST_TICKET']; break;
           case 'refund': typeFilter = ['REFUND']; break;
         }
@@ -1431,7 +1453,7 @@ export class AdminController {
             gte: queryStartDate,
             lt: queryEndDate
           },
-          type: { in: ['PARKING', 'PENSION', 'LOST_TICKET'] }
+          type: { in: ['PARKING', 'PENSION', 'PARTNER', 'LOST_TICKET'] }
         },
         select: {
           timestamp: true,
@@ -1521,11 +1543,12 @@ export class AdminController {
       }
 
       // Build transaction type filter
-      let typeFilter: string[] = ['PARKING', 'PENSION', 'LOST_TICKET', 'REFUND'];
+      let typeFilter: string[] = ['PARKING', 'PENSION', 'PARTNER', 'LOST_TICKET', 'REFUND'];
       if (transactionType && transactionType !== 'all') {
         switch (transactionType) {
           case 'parking': typeFilter = ['PARKING']; break;
           case 'pension': typeFilter = ['PENSION']; break;
+          case 'partner': typeFilter = ['PARTNER']; break;
           case 'lost_ticket': typeFilter = ['LOST_TICKET']; break;
           case 'refund': typeFilter = ['REFUND']; break;
         }
@@ -1556,6 +1579,19 @@ export class AdminController {
               select: {
                 name: true,
                 plateNumber: true
+              }
+            },
+            partnerTicket: {
+              select: {
+                plateNumber: true,
+                customerName: true,
+                agreedRate: true,
+                partnerBusiness: {
+                  select: {
+                    name: true,
+                    businessType: true
+                  }
+                }
               }
             }
           },
@@ -1592,6 +1628,12 @@ export class AdminController {
         const transactionWithRelations = transaction as typeof transaction & {
           ticket?: { plateNumber: string; barcode: string; entryTime: Date } | null;
           pension?: { name: string; plateNumber: string } | null;
+          partnerTicket?: { 
+            plateNumber: string; 
+            customerName: string; 
+            agreedRate: any;
+            partnerBusiness: { name: string; businessType: string } 
+          } | null;
         };
         
         return {
@@ -1602,10 +1644,11 @@ export class AdminController {
           timestamp: transactionWithRelations.timestamp,
           operatorId: transactionWithRelations.operatorId,
           paymentMethod: transactionWithRelations.paymentMethod,
-          plateNumber: transactionWithRelations.ticket?.plateNumber || transactionWithRelations.pension?.plateNumber,
-          customerName: transactionWithRelations.pension?.name,
+          plateNumber: transactionWithRelations.ticket?.plateNumber || transactionWithRelations.pension?.plateNumber || transactionWithRelations.partnerTicket?.plateNumber,
+          customerName: transactionWithRelations.pension?.name || transactionWithRelations.partnerTicket?.customerName,
           ticketBarcode: transactionWithRelations.ticket?.barcode,
-          entryTime: transactionWithRelations.ticket?.entryTime
+          entryTime: transactionWithRelations.ticket?.entryTime,
+          partnerName: transactionWithRelations.partnerTicket?.partnerBusiness?.name
         };
       });
 
@@ -2472,7 +2515,7 @@ export class AdminController {
             gte: startOfDay,
             lte: endOfDay
           },
-          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION'] }
+          type: { in: ['PARKING', 'LOST_TICKET', 'PENSION', 'PARTNER'] }
         },
         _sum: {
           amount: true

@@ -5,7 +5,7 @@ interface ReportFiltersProps {
     startDate: string;
     endDate: string;
     reportType: 'daily' | 'weekly' | 'monthly';
-    transactionType: 'all' | 'parking' | 'pension' | 'lost_ticket' | 'refund';
+    transactionType: 'all' | 'parking' | 'pension' | 'partner' | 'lost_ticket' | 'refund';
   };
   onFiltersChange: (filters: any) => void;
 }
@@ -134,6 +134,7 @@ export default function ReportFilters({ filters, onFiltersChange }: ReportFilter
             <option value="all">Todas</option>
             <option value="parking">Estacionamiento</option>
             <option value="pension">Pensión</option>
+            <option value="partner">Socio Comercial</option>
             <option value="lost_ticket">Boleto Perdido</option>
             <option value="refund">Reembolso</option>
           </select>
