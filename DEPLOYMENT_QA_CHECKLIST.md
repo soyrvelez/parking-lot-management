@@ -47,17 +47,58 @@
 [ ] git log --oneline -5
 ```
 
-### 0.3 Transferir Archivos de Configuración (si aplica)
+### 0.3 Crear Archivo de Configuración de Producción
 ```bash
-# Desde MacBook - copiar archivos de configuración sensibles
-[ ] scp .env.production parking@[IP_THINKPAD]:/home/parking/deployments/parking-lot-management/.env
-[ ] scp database-credentials.txt parking@[IP_THINKPAD]:/home/parking/deployments/parking-lot-management/
+# En MacBook - crear .env.production desde template
+[ ] cd /Users/velez/dev/parking-lot-management
+[ ] cp .env.production.template .env.production
 
-# Verificar archivos transferidos
-[ ] ssh parking@[IP_THINKPAD] "ls -la /home/parking/deployments/parking-lot-management/"
+# Editar .env.production para producción
+[ ] nano .env.production
 ```
 
-### 0.4 Verificación de Permisos y Estructura
+**Variables CRÍTICAS que DEBES cambiar en .env.production:**
+
+1. **DATABASE_URL**: Cambiar password por uno seguro
+   ```
+   "postgresql://parking_user:TU_PASSWORD_SEGURO@localhost:5432/parking_lot_prod"
+   ```
+
+2. **JWT_SECRET**: Generar clave secreta aleatoria (32+ caracteres)
+   ```bash
+   # Generar JWT secret aleatorio:
+   [ ] openssl rand -hex 32
+   # Copiar resultado al archivo .env.production
+   ```
+
+3. **IPs de red**: Verificar que coincidan con tu configuración
+   - ThinkPad IP: `192.168.1.50`
+   - Printer IP: `192.168.1.100`
+   - CORS_ORIGIN: `http://192.168.1.50`
+
+**Ejemplo de configuración final:**
+```bash
+DATABASE_URL="postgresql://parking_user:MySecure2024Pass!@localhost:5432/parking_lot_prod"
+JWT_SECRET="a1b2c3d4e5f6789012345678901234567890abcdef1234567890"
+NODE_ENV="production"
+PRINTER_HOST="192.168.1.100"
+CORS_ORIGIN="http://192.168.1.50"
+# ... resto de configuración desde template
+```
+
+### 0.4 Transferir Archivos de Configuración
+```bash
+# Desde MacBook - copiar archivo de configuración de producción
+[ ] scp .env.production parking@[IP_THINKPAD]:/home/parking/deployments/parking-lot-management/.env
+
+# Verificar archivo transferido
+[ ] ssh parking@[IP_THINKPAD] "ls -la /home/parking/deployments/parking-lot-management/.env"
+
+# Verificar contenido (sin mostrar secrets)
+[ ] ssh parking@[IP_THINKPAD] "grep -E '^[A-Z_]+=' /home/parking/deployments/parking-lot-management/.env | head -10"
+```
+
+### 0.5 Verificación de Permisos y Estructura
 ```bash
 # Via SSH en ThinkPad
 [ ] cd /home/parking/deployments/parking-lot-management
