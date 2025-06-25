@@ -3,6 +3,7 @@
 ## ✅ ESTADO ACTUAL DEL SISTEMA
 
 ### 🎯 Correcciones Críticas Implementadas
+
 - [x] **Sistema de Pensiones**: Corregido el cobro incorrecto (ahora cobra monto completo por duración seleccionada)
 - [x] **Pantalla de Pago**: Corregida la redirección automática (ahora muestra formulario de pago)
 - [x] **Procesamiento de Pagos**: Corregido el crash con clientes inactivos
@@ -79,6 +80,7 @@
 ## 📋 FASE 1: PRE-INSTALACIÓN (VIA SSH)
 
 ### 1.1 Verificación de Hardware ThinkPad
+
 - [ ] **Modelo**: Lenovo ThinkPad T480 o superior
 - [ ] **RAM**: Mínimo 8GB instalados
 - [ ] **Almacenamiento**: Mínimo 256GB SSD
@@ -87,6 +89,7 @@
 - [ ] **Puertos USB**: Mínimo 2 puertos funcionales
 
 ### 1.2 Periféricos Requeridos
+
 - [ ] **Impresora Térmica**: Epson TM-T20III conectada y encendida
   - [ ] Cable Ethernet conectado
   - [ ] Papel térmico 58mm instalado
@@ -97,6 +100,7 @@
   - [ ] Probado con código de barras de prueba
 
 ### 1.3 Configuración de Red
+
 - [ ] **IP Estática del ThinkPad**: 192.168.1.50
 - [ ] **IP de la Impresora**: 192.168.1.100
 - [ ] **Gateway**: 192.168.1.1
@@ -105,37 +109,18 @@
 
 ---
 
-## 📦 FASE 2: INSTALACIÓN DEL SISTEMA (VIA SSH)
+## 📦 FASE 2: INSTALACIÓN DEL SISTEMA
 
 ### 2.1 Preparación
-```bash
-# Via SSH - navegar al directorio del proyecto
-[ ] ssh parking@[IP_THINKPAD]
-[ ] cd /home/parking/deployments/parking-lot-management
 
-# Verificar scripts de instalación
+```bash
+# Verificar que el script de instalación esté presente
 [ ] ls -la scripts/install-all.sh
-[ ] ls -la scripts/setup/
-[ ] ls -la scripts/deploy/
-
-# Asegurar permisos de ejecución
 [ ] chmod +x scripts/install-all.sh
-[ ] find scripts/ -name "*.sh" -exec chmod +x {} \;
 ```
 
-### 2.2 Instalación de Dependencias Base
-```bash
-# Actualizar sistema operativo
-[ ] sudo apt update && sudo apt upgrade -y
+### 2.2 Ejecución de Instalación
 
-# Instalar herramientas básicas
-[ ] sudo apt install -y curl wget git build-essential software-properties-common
-
-# Verificar espacio en disco (mínimo 10GB)
-[ ] df -h /
-```
-
-### 2.3 Ejecución de Instalación Completa
 ```bash
 # Ejecutar instalación completa (45-90 minutos)
 # IMPORTANTE: Mantener sesión SSH activa con screen/tmux
@@ -151,6 +136,7 @@
 ```
 
 ### 2.4 Monitoreo de Instalación desde MacBook
+
 ```bash
 # Desde MacBook - monitorear logs de instalación
 [ ] ssh parking@[IP_THINKPAD] "tail -f /var/log/parking-installation-*.log"
@@ -161,6 +147,7 @@
 ```
 
 ### 2.3 Verificación Post-Instalación
+
 - [ ] Sistema operativo actualizado
 - [ ] PostgreSQL instalado y ejecutándose
 - [ ] Node.js v18+ instalado
@@ -170,90 +157,45 @@
 
 ---
 
-## 🔧 FASE 3: CONFIGURACIÓN DE LA APLICACIÓN (VIA SSH)
+## 🔧 FASE 3: CONFIGURACIÓN DE LA APLICACIÓN
 
-### 3.1 Verificar Instalación Completada
+### 3.1 Base de Datos
+
 ```bash
-# Via SSH - verificar estado final de instalación
-[ ] ssh parking@[IP_THINKPAD]
-[ ] cat /opt/parking-installation-status.txt
-
-# Verificar que todas las fases se completaron
-[ ] grep "Estado: EXITOSO" /opt/parking-installation-status.txt
-```
-
-### 3.2 Configuración de Base de Datos
-```bash
-# Verificar PostgreSQL activo
-[ ] sudo systemctl status postgresql
-
 # Verificar conexión a PostgreSQL
 [ ] sudo -u postgres psql -c "SELECT version();"
 
 # Verificar base de datos creada
 [ ] sudo -u postgres psql -l | grep parking_lot_prod
 
-# Navegar al directorio de la aplicación
-[ ] cd /opt/parking-system
-
-# Verificar esquema con Prisma (si aplicable)
-[ ] npx prisma db status || echo "Prisma no configurado - usando SQL directo"
+# Verificar esquema de base de datos
+[ ] cd /home/parking/parking-system && npx prisma db push
 ```
 
-### 3.3 Configuración de Entorno
+### 3.2 Configuración de Entorno
+
 ```bash
-# Verificar archivo .env generado por instalación
-[ ] cat /opt/parking-system/.env
+# Verificar archivo .env
+[ ] cat /home/parking/parking-system/.env
 
 # Variables críticas a verificar:
-[ ] grep "DATABASE_URL" /opt/parking-system/.env
-[ ] grep "NODE_ENV=production" /opt/parking-system/.env
-[ ] grep "PRINTER_IP=192.168.1.100" /opt/parking-system/.env
-[ ] grep "JWT_SECRET" /opt/parking-system/.env
-
-# Si falta alguna variable, agregarla:
-[ ] echo "MISSING_VAR=value" >> /opt/parking-system/.env
+[ ] DATABASE_URL=postgresql://parking_user:SecurePassword123!@localhost:5432/parking_lot_prod
+[ ] NODE_ENV=production
+[ ] PRINTER_HOST=192.168.1.100
+[ ] PRINTER_PORT=9100
+[ ] JWT_SECRET=(valor seguro generado)
 ```
 
-### 3.4 Inicialización de Datos
+### 3.3 Inicialización de Datos
+
 ```bash
-# El script de instalación debería haber creado datos iniciales
-# Verificar datos en la base de datos:
+# Ejecutar seed de base de datos
+[ ] cd /home/parking/parking-system && npm run db:seed
 
-[ ] sudo -u postgres psql parking_lot_prod -c "SELECT * FROM pricing_config;"
-[ ] sudo -u postgres psql parking_lot_prod -c "SELECT username, role FROM system_users;"
-[ ] sudo -u postgres psql parking_lot_prod -c "SELECT * FROM cash_register;"
-
-# Si no hay datos, ejecutar seed manualmente:
-[ ] cd /home/parking/deployments/parking-lot-management
-[ ] npm run db:seed
-```
-
-### 3.5 Copiar Código de Aplicación Actual
-```bash
-# Copiar código más reciente sobre la instalación base
-[ ] cd /home/parking/deployments/parking-lot-management
-
-# Hacer backup de la aplicación instalada
-[ ] sudo cp -r /opt/parking-system /opt/parking-system.backup
-
-# Copiar archivos actualizados
-[ ] sudo cp -r src/* /opt/parking-system/src/ 2>/dev/null || true
-[ ] sudo cp package*.json /opt/parking-system/
-[ ] sudo cp -r prisma/ /opt/parking-system/ 2>/dev/null || true
-
-# Preservar configuración
-[ ] sudo cp /opt/parking-system.backup/.env /opt/parking-system/.env
-
-# Instalar dependencias actualizadas
-[ ] cd /opt/parking-system
-[ ] sudo npm install
-
-# Construir aplicación
-[ ] sudo npm run build || echo "Build no disponible - usando código directo"
-
-# Corregir permisos
-[ ] sudo chown -R parking:parking /opt/parking-system
+# Verificar datos iniciales:
+[ ] Configuración de precios creada ($800 MXN mensual)
+[ ] Usuario admin creado
+[ ] Caja registradora inicializada
 ```
 
 ---
@@ -261,11 +203,13 @@
 ## 🖥️ FASE 4: VERIFICACIÓN DE MODO KIOSKO
 
 ### 4.1 Configuración de Usuario
+
 - [ ] Usuario `parking` creado sin privilegios sudo
 - [ ] Contraseña establecida: `ParkingKiosk2024!`
 - [ ] Inicio de sesión automático configurado
 
 ### 4.2 Interfaz de Kiosko
+
 - [ ] Chromium abre automáticamente en pantalla completa
 - [ ] URL correcta: `http://localhost:3001`
 - [ ] Sin barra de direcciones visible
@@ -273,6 +217,7 @@
 - [ ] Alt+F4 deshabilitado
 
 ### 4.3 Restricciones de Seguridad
+
 - [ ] Ctrl+Alt+F1-F7 deshabilitado
 - [ ] Acceso a terminal bloqueado
 - [ ] USB storage deshabilitado
@@ -280,426 +225,179 @@
 
 ---
 
-## 🚀 FASE 5: INICIO DE SERVICIOS (VIA SSH)
+## 🧪 FASE 5: PRUEBAS FUNCIONALES
 
-### 5.1 Iniciar Servicios del Sistema
-```bash
-# Iniciar servicio principal de estacionamiento
-[ ] sudo systemctl start parking-system
-[ ] sudo systemctl enable parking-system
+### 5.1 Flujo de Entrada de Vehículo
 
-# Verificar estado de servicios
-[ ] sudo systemctl status parking-system
-[ ] sudo systemctl status postgresql
-[ ] sudo systemctl status nginx
-
-# Ver logs de inicio
-[ ] sudo journalctl -u parking-system -f --lines 50
-```
-
-### 5.2 Verificar Acceso Web
-```bash
-# Probar acceso local en ThinkPad
-[ ] curl -I http://localhost:3000/health
-[ ] curl -I http://localhost/
-
-# Desde MacBook - probar acceso remoto
-[ ] curl -I http://[IP_THINKPAD]/
-[ ] curl -I http://[IP_THINKPAD]/health
-```
-
----
-
-## 🧪 FASE 6: PRUEBAS FUNCIONALES (ACCESO WEB)
-
-### 6.1 Acceso a la Aplicación
-```bash
-# Desde MacBook - abrir navegador
-[ ] open http://[IP_THINKPAD]
-
-# O usar SSH tunnel para acceso seguro
-[ ] ssh -L 8080:[IP_THINKPAD]:80 parking@[IP_THINKPAD]
-[ ] open http://localhost:8080
-```
-
-### 6.2 Flujo de Entrada de Vehículo
 1. [ ] Pantalla principal del operador carga correctamente
 2. [ ] Presionar "ENTRADA" funciona
 3. [ ] Ingresar placa "TEST-001"
 4. [ ] Boleto se crea exitosamente
-5. [ ] **Verificar en logs**: `ssh parking@[IP_THINKPAD] "tail -f /var/log/parking-system/*.log"`
+5. [ ] Impresora imprime boleto con código de barras
+6. [ ] Código de barras legible: `*TITTEST001*`
 
-### 6.3 Flujo de Salida y Pago
-1. [ ] Usar código de barras del boleto creado
+### 5.2 Flujo de Salida y Pago
+
+1. [ ] Escanear código de barras del boleto
 2. [ ] Sistema calcula tarifa correctamente
 3. [ ] Ingresar monto de pago
 4. [ ] Cambio se calcula correctamente
 5. [ ] Pago se procesa sin errores
+6. [ ] Recibo se imprime correctamente
 
-### 6.4 Sistema de Pensiones (CRÍTICO - NUEVAS CORRECCIONES)
-**PRUEBA CRÍTICA - Verificar correcciones implementadas:**
+### 5.3 Sistema de Pensiones (CRÍTICO - NUEVAS CORRECCIONES)
 
 1. [ ] Registrar nuevo cliente de pensión:
-   - [ ] Nombre: "Cliente Prueba SSH"
-   - [ ] Placa: "PENS-SSH1"
-   - [ ] Duración: **3 meses**
-   - [ ] **VERIFICAR**: Muestra total **$2,400 MXN** (3 × $800)
-   
+   - [ ] Nombre: "Cliente Prueba"
+   - [ ] Placa: "PENS-001"
+   - [ ] Duración: 2 meses
+   - [ ] **VERIFICAR**: Muestra total $1,600 MXN (2 × $800)
 2. [ ] Sistema navega a pantalla de pago:
    - [ ] **VERIFICAR**: NO hay redirección automática
    - [ ] Pantalla de pago permanece abierta
-   - [ ] Muestra monto correcto: $2,400 MXN
-   
 3. [ ] Procesar pago inicial:
-   - [ ] Ingresar $2,400 MXN
+   - [ ] Ingresar $1,600 MXN
    - [ ] **VERIFICAR**: Pago se procesa sin crashes
    - [ ] Cliente se activa correctamente
-   - [ ] **Verificar en BD**: `ssh parking@[IP_THINKPAD] "sudo -u postgres psql parking_lot_prod -c \"SELECT name, monthly_rate, start_date, end_date, is_active FROM pension_customers WHERE plate_number='PENS-SSH1';\";"`
+   - [ ] Recibo muestra período correcto (2 meses)
 
-### 6.5 Pruebas de Monto Alto (>$9,999)
-1. [ ] Registrar pensión de 15 meses: $12,000 MXN
-2. [ ] **VERIFICAR**: Sistema maneja monto sin errores
-3. [ ] **VERIFICAR**: Formatting correcto en pantalla
+### 5.4 Boleto Perdido
 
-### 6.6 Boleto Perdido
 1. [ ] Seleccionar "Boleto Perdido"
-2. [ ] Verificar tarifa: $100 MXN (configuración actual)
+2. [ ] Verificar tarifa: $50 MXN
 3. [ ] Procesar pago
-4. [ ] **Verificar en logs**: transacción registrada correctamente
+4. [ ] Recibo especial se imprime
 
 ---
 
-## 🔌 FASE 7: INTEGRACIÓN DE HARDWARE (VIA SSH)
+## 🔌 FASE 6: INTEGRACIÓN DE HARDWARE
 
-### 7.1 Impresora Térmica - Pruebas Remotas
+### 6.1 Impresora Térmica
+
 ```bash
-# Via SSH - probar conectividad de impresora
-[ ] ssh parking@[IP_THINKPAD] "ping -c 3 192.168.1.100"
-
-# Probar puerto de impresión
-[ ] ssh parking@[IP_THINKPAD] "nc -zv 192.168.1.100 9100"
+# Prueba de conectividad
+[ ] ping 192.168.1.100
 
 # Prueba de impresión directa
-[ ] ssh parking@[IP_THINKPAD] "echo 'PRUEBA SSH DEPLOYMENT' | nc 192.168.1.100 9100"
+[ ] echo "PRUEBA" | nc 192.168.1.100 9100
 
-# Verificar API de hardware
-[ ] ssh parking@[IP_THINKPAD] "curl -s http://localhost/api/hardware/status | jq ." || ssh parking@[IP_THINKPAD] "curl -s http://localhost/api/hardware/status"
+# Verificar cola de impresión
+[ ] curl http://localhost:4000/api/hardware/status
 ```
 
-### 7.2 Scanner de Códigos - Configuración Remota
-```bash
-# Verificar dispositivos USB conectados
-[ ] ssh parking@[IP_THINKPAD] "lsusb | grep -i honeywell"
+### 6.2 Scanner de Códigos
 
-# Verificar configuración HID
-[ ] ssh parking@[IP_THINKPAD] "ls -la /dev/input/by-id/ | grep -i honeywell"
-
-# Prueba de scanner con aplicación
-# (Requiere acceso físico al ThinkPad para escanear código)
-```
-
-### 7.3 Pruebas de Hardware Integradas
-```bash
-# Desde la aplicación web - realizar prueba completa:
-# 1. Crear boleto con impresión
-# 2. Escanear código de barras generado
-# 3. Verificar flujo completo
-
-# Monitorear logs durante pruebas de hardware
-[ ] ssh parking@[IP_THINKPAD] "tail -f /var/log/parking-system/*.log | grep -i 'printer\|scanner\|barcode'"
-```
+1. [ ] Abrir bloc de notas
+2. [ ] Escanear código de prueba
+3. [ ] Verificar que aparece texto: `*TITABC123*`
+4. [ ] Verificar Enter automático al final
 
 ---
 
-## 🛡️ FASE 8: SEGURIDAD Y RESPALDOS (VIA SSH)
+## 🛡️ FASE 7: SEGURIDAD Y RESPALDOS
 
-### 8.1 Verificación de Seguridad
-```bash
-# Verificar firewall UFW
-[ ] ssh parking@[IP_THINKPAD] "sudo ufw status verbose"
+### 7.1 Seguridad
 
-# Verificar reglas de firewall
-[ ] ssh parking@[IP_THINKPAD] "sudo ufw status numbered"
+- [ ] Firewall UFW activo con reglas correctas
+- [ ] SSH deshabilitado o con acceso restringido
+- [ ] Contraseñas seguras establecidas
+- [ ] Actualizaciones automáticas configuradas
 
-# Verificar SSH configurado correctamente
-[ ] ssh parking@[IP_THINKPAD] "sudo systemctl status ssh"
+### 7.2 Respaldos
 
-# Verificar fail2ban (si está instalado)
-[ ] ssh parking@[IP_THINKPAD] "sudo systemctl status fail2ban" || echo "fail2ban no instalado"
-
-# Verificar usuarios del sistema
-[ ] ssh parking@[IP_THINKPAD] "getent passwd | grep -E '(parking|admin)'"
-```
-
-### 8.2 Configuración de Respaldos
 ```bash
 # Verificar script de respaldo
-[ ] ssh parking@[IP_THINKPAD] "ls -la /opt/parking-backup.sh"
+[ ] ls -la /home/parking/backup/backup.sh
 
-# Verificar configuración de cron
-[ ] ssh parking@[IP_THINKPAD] "sudo crontab -l | grep backup"
+# Verificar cron job
+[ ] sudo crontab -l | grep backup
 
-# Ejecutar respaldo manual de prueba
-[ ] ssh parking@[IP_THINKPAD] "sudo /opt/parking-backup.sh"
-
-# Verificar que se creó el respaldo
-[ ] ssh parking@[IP_THINKPAD] "ls -la /var/backups/parking/ | tail -5"
-```
-
-### 8.3 Configuración de Actualizaciones
-```bash
-# Verificar actualizaciones automáticas
-[ ] ssh parking@[IP_THINKPAD] "sudo apt list --upgradable"
-
-# Configurar actualizaciones automáticas de seguridad
-[ ] ssh parking@[IP_THINKPAD] "sudo dpkg-reconfigure -plow unattended-upgrades"
+# Ejecutar respaldo manual
+[ ] sudo /home/parking/backup/backup.sh
 ```
 
 ---
 
-## 📊 FASE 9: MONITOREO Y LOGS (VIA SSH)
+## 📊 FASE 8: MONITOREO Y LOGS
 
-### 9.1 Verificación de Servicios Activos
+### 8.1 Servicios Activos
+
 ```bash
-# Verificar todos los servicios críticos
-[ ] ssh parking@[IP_THINKPAD] "sudo systemctl status postgresql"
-[ ] ssh parking@[IP_THINKPAD] "sudo systemctl status nginx"
-[ ] ssh parking@[IP_THINKPAD] "sudo systemctl status parking-system"
-
-# Si hay PM2 configurado
-[ ] ssh parking@[IP_THINKPAD] "pm2 status" || echo "PM2 no configurado"
-
-# Verificar puertos en uso
-[ ] ssh parking@[IP_THINKPAD] "sudo netstat -tlnp | grep -E ':(80|443|3000|5432)'"
+# Verificar todos los servicios
+[ ] sudo systemctl status postgresql
+[ ] sudo systemctl status nginx
+[ ] pm2 status
+[ ] pm2 logs parking-backend --lines 50
 ```
 
-### 9.2 Análisis de Logs
-```bash
-# Logs del sistema
-[ ] ssh parking@[IP_THINKPAD] "sudo journalctl -u parking-system --lines 50 --no-pager"
+### 8.2 Logs de Aplicación
 
-# Logs de nginx
-[ ] ssh parking@[IP_THINKPAD] "sudo tail -50 /var/log/nginx/access.log"
-[ ] ssh parking@[IP_THINKPAD] "sudo tail -50 /var/log/nginx/error.log"
-
-# Logs de la aplicación
-[ ] ssh parking@[IP_THINKPAD] "sudo tail -50 /var/log/parking-system/*.log" || echo "Logs de aplicación no encontrados"
-
-# Verificar errores críticos
-[ ] ssh parking@[IP_THINKPAD] "sudo journalctl --priority=err --since today"
-```
-
-### 9.3 Monitoreo de Recursos
-```bash
-# Uso de CPU y memoria
-[ ] ssh parking@[IP_THINKPAD] "top -b -n 1 | head -20"
-
-# Espacio en disco
-[ ] ssh parking@[IP_THINKPAD] "df -h"
-
-# Procesos de la aplicación
-[ ] ssh parking@[IP_THINKPAD] "ps aux | grep -E '(node|postgres|nginx)'"
-```
-
-### 9.4 Script de Verificación Automatizada
-```bash
-# Ejecutar script de verificación completa
-[ ] ssh parking@[IP_THINKPAD] "sudo /home/parking/deployments/parking-lot-management/scripts/verify-deployment.sh"
-
-# Revisar resultados
-[ ] ssh parking@[IP_THINKPAD] "echo 'Script de verificación completado con código de salida: $?'"
-```
+- [ ] Logs de backend sin errores críticos
+- [ ] Transacciones registrándose correctamente
+- [ ] Auditoría funcionando
 
 ---
 
-## 🚨 FASE 10: PLAN DE CONTINGENCIA Y DOCUMENTACIÓN
+## 🚨 FASE 9: PLAN DE CONTINGENCIA
 
-### 10.1 Configurar Acceso Remoto de Emergencia
-```bash
-# Configurar VPN/túnel SSH para acceso remoto
-[ ] ssh parking@[IP_THINKPAD] "sudo ufw allow from [IP_MACBOOK] to any port 22"
+### 9.1 Números de Contacto
 
-# Crear usuario de emergencia
-[ ] ssh parking@[IP_THINKPAD] "sudo useradd -m -s /bin/bash emergency-admin"
-[ ] ssh parking@[IP_THINKPAD] "sudo usermod -aG sudo emergency-admin"
+- [ ] Soporte técnico: ******\_\_\_\_******
+- [ ] Administrador del sistema: ******\_\_\_\_******
+- [ ] Proveedor de Internet: ******\_\_\_\_******
 
-# Configurar autologin para emergencias
-[ ] ssh parking@[IP_THINKPAD] "sudo systemctl disable ssh" || echo "SSH mantenido activo para soporte"
-```
+### 9.2 Procedimientos de Emergencia
 
-### 10.2 Documentación de Credenciales
-```bash
-# Descargar información crítica al MacBook
-[ ] scp parking@[IP_THINKPAD]:/opt/parking-installation-status.txt ./deployment-status-$(date +%Y%m%d).txt
-[ ] scp parking@[IP_THINKPAD]:/opt/parking-setup-status.txt ./setup-status-$(date +%Y%m%d).txt
-
-# Crear archivo de credenciales locales (NO subir a git)
-[ ] cat > ./CREDENTIALS-THINKPAD.txt << EOF
-# CREDENCIALES THINKPAD ESTACIONAMIENTO
-# GENERADO: $(date)
-# IP THINKPAD: [IP_THINKPAD]
-
-# Sistema Operativo
-Usuario Operador: parking
-Usuario Admin: emergency-admin
-
-# Base de Datos
-URL: postgresql://parking_user:PASSWORD@localhost:5432/parking_lot_prod
-Usuario BD: parking_user
-
-# Aplicación Web
-URL: http://[IP_THINKPAD]/
-Usuario Admin: admin
-Password: admin123 (CAMBIAR INMEDIATAMENTE)
-
-# SSH desde MacBook
-ssh parking@[IP_THINKPAD]
-ssh emergency-admin@[IP_THINKPAD]
-
-# Comandos Útiles
-Logs: sudo journalctl -u parking-system -f
-Restart: sudo systemctl restart parking-system
-Status: sudo systemctl status parking-system
-Backup: sudo /opt/parking-backup.sh
-
-EOF
-```
-
-### 10.3 Números de Contacto
-- [ ] Soporte técnico: ________________
-- [ ] Administrador del sistema: ________________
-- [ ] Proveedor de Internet: ________________
-- [ ] **SSH desde MacBook**: ssh parking@[IP_THINKPAD]
+- [ ] Documento de recuperación impreso y disponible
+- [ ] USB de recuperación preparado
+- [ ] Contraseñas de emergencia documentadas
 
 ---
 
-## ✅ FASE 11: ENTREGA FINAL Y CAPACITACIÓN
+## ✅ FASE 10: ENTREGA FINAL
 
-### 11.1 Capacitación Remota del Operador
-```bash
-# Establecer sesión compartida para capacitación
-[ ] ssh parking@[IP_THINKPAD]
-[ ] # Navegar junto con operador por la interfaz web
+### 10.1 Capacitación del Operador
 
-# Capacitación vía navegador desde MacBook
-[ ] open http://[IP_THINKPAD]
-```
+- [ ] Demostrar entrada de vehículo
+- [ ] Demostrar cobro y salida
+- [ ] Demostrar registro de pensión
+- [ ] Demostrar manejo de boleto perdido
+- [ ] Entregar guía rápida impresa
 
-**Procedimientos a demostrar:**
-- [ ] Entrada de vehículo: placa → imprimir boleto
-- [ ] Salida y pago: escanear → calcular → cobrar → recibo
-- [ ] **Sistema de pensiones**: registro → duración → pago completo
-- [ ] Boleto perdido: tarifa especial → recibo
-- [ ] Cerrar turno: verificar caja
+### 10.2 Documentación Entregada
 
-### 11.2 Documentación Entregada (Digital)
-```bash
-# Descargar documentación al MacBook
-[ ] scp parking@[IP_THINKPAD]:/home/parking/deployments/parking-lot-management/TROUBLESHOOTING_GUIDE.md ./
-[ ] scp parking@[IP_THINKPAD]:/home/parking/deployments/parking-lot-management/DEPLOYMENT_QA_CHECKLIST.md ./
+- [ ] Manual del operador (impreso)
+- [ ] Guía de solución de problemas
+- [ ] Contactos de soporte
+- [ ] Procedimientos de cierre diario
 
-# Crear manual de operador simplificado
-[ ] cat > MANUAL_OPERADOR_RAPIDO.md << 'EOF'
-# MANUAL RÁPIDO - OPERADOR ESTACIONAMIENTO
+### 10.3 Verificación Final
 
-## INICIO DIARIO
-1. Verificar que sistema esté encendido
-2. URL: http://localhost (debe abrir automáticamente)
-
-## ENTRADA VEHÍCULO
-1. Clic "ENTRADA"
-2. Escribir placa
-3. Clic "GENERAR BOLETO"
-4. Entregar boleto al cliente
-
-## SALIDA Y PAGO
-1. Escanear código del boleto
-2. Sistema calcula tarifa
-3. Ingresar dinero recibido
-4. Entregar cambio y recibo
-
-## PENSIÓN
-1. Clic "PENSIÓN"
-2. Llenar datos del cliente
-3. Seleccionar duración (meses)
-4. VERIFICAR monto total correcto
-5. Procesar pago
-6. Entregar recibo
-
-## EMERGENCIAS
-- Si falla sistema: Anotar placas en papel
-- Soporte: ssh parking@[IP_THINKPAD]
-- Reiniciar: sudo systemctl restart parking-system
-
-EOF
-```
-
-### 11.3 Verificación Final Completa
-```bash
-# Ejecutar verificación automatizada final
-[ ] ssh parking@[IP_THINKPAD] "/home/parking/deployments/parking-lot-management/scripts/verify-deployment.sh"
-
-# Verificar que todo funciona sin intervención
-[ ] curl -I http://[IP_THINKPAD]/health
-
-# Test final del sistema de pensiones
-[ ] echo "Realizar prueba manual de pensión 6 meses: debe cobrar 6 × 800 = 4800 MXN"
-```
-
-**Criterios de Aceptación Final:**
-- [ ] Sistema funcionando 30 min sin errores
-- [ ] Operador completa flujos sin asistencia
-- [ ] **Pensiones cobra monto correcto por duración**
-- [ ] Hardware impresora/scanner operativo
-- [ ] Acceso SSH desde MacBook funcionando
-- [ ] Respaldos automáticos configurados
-- [ ] Documentación completa entregada
+- [ ] Sistema funcionando en modo producción
+- [ ] Operador capacitado y cómodo
+- [ ] Hardware funcionando correctamente
+- [ ] Respaldos configurados
+- [ ] Cliente satisfecho con la instalación
 
 ---
 
-## 📝 NOTAS IMPORTANTES PARA DESPLIEGUE VIA SSH
+## 📝 NOTAS IMPORTANTES
 
-1. **Tiempo estimado total**: 3-4 horas incluyendo capacitación remota
+1. **Tiempo estimado total**: 2-3 horas incluyendo capacitación
 2. **Horario recomendado**: Realizar fuera de horas pico
-3. **Personal requerido**: 1 técnico remoto (MacBook) + 1 operador local (ThinkPad)
-4. **Conexión SSH**: Mantener conexión estable durante todo el proceso
-5. **Respaldo previo**: Siempre respaldar datos existentes antes de actualizar
-6. **Screen/tmux**: Usar para evitar pérdida de sesión durante instalación larga
+3. **Personal requerido**: 1 técnico + 1 operador para capacitación
+4. **Respaldo previo**: Siempre respaldar datos existentes antes de actualizar
 
-## 🎯 CRITERIOS DE ÉXITO ESPECÍFICOS
+## 🎯 CRITERIOS DE ÉXITO
 
-✅ **Sistema de pensiones**: Cobra correctamente por duración seleccionada (ej: 3 meses = $2,400 MXN)  
-✅ **Acceso SSH estable**: Conexión desde MacBook sin interrupciones  
-✅ **Interfaz web accesible**: http://[IP_THINKPAD] responde correctamente  
-✅ **Hardware funcional**: Impresora y scanner integrados correctamente  
-✅ **Verificación automatizada**: Script verify-deployment.sh ejecuta sin errores  
-✅ **Capacitación remota completada**: Operador maneja sistema independientemente  
-✅ **Documentación descargada**: Manuales y guías disponibles en MacBook  
-
-## 🔄 COMANDOS RÁPIDOS DE EMERGENCIA
-
-```bash
-# Desde MacBook - Diagnóstico rápido
-ssh parking@[IP_THINKPAD] "sudo systemctl status parking-system"
-ssh parking@[IP_THINKPAD] "curl -I http://localhost/health"
-ssh parking@[IP_THINKPAD] "sudo journalctl -u parking-system --lines 20"
-
-# Reinicio de emergencia
-ssh parking@[IP_THINKPAD] "sudo systemctl restart parking-system"
-
-# Ver logs en tiempo real
-ssh parking@[IP_THINKPAD] "sudo journalctl -u parking-system -f"
-
-# Verificación completa automatizada
-ssh parking@[IP_THINKPAD] "/home/parking/deployments/parking-lot-management/scripts/verify-deployment.sh"
-```
+✅ Sistema operativo sin errores durante 30 minutos continuos
+✅ Operador puede completar todas las tareas básicas sin asistencia
+✅ Hardware (impresora y scanner) funcionando confiablemente
+✅ Respaldos automáticos verificados
+✅ Documentación completa entregada
 
 ---
 
-**Fecha de Despliegue**: _______________  
-**Técnico Responsable (MacBook)**: _______________  
-**Operador Local (ThinkPad)**: _______________  
-**IP ThinkPad**: _______________  
-**Verificación SSH Exitosa**: [ ] ✅  
-**Sistema de Pensiones Validado**: [ ] ✅  
-**Firma de Conformidad**: _______________
+**Fecha de Despliegue**: ******\_\_\_******
+**Técnico Responsable**: ******\_\_\_******
+**Firma de Conformidad**: ******\_\_\_******
