@@ -12,21 +12,61 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Logging functions
+# Function to sanitize log messages (remove sensitive data)
+sanitize_log() {
+    local message="$1"
+    # Remove passwords, tokens, and credentials
+    message=$(echo "$message" | sed -E 's/(password|passwd|secret|token|key|credential)[=:][ ]*[^ ]*/(password|passwd|secret|token|key|credential)=***HIDDEN***/gi')
+    message=$(echo "$message" | sed -E 's/postgresql:\/\/[^:]*:[^@]*@/postgresql:\/\/***:***@/gi')
+    message=$(echo "$message" | sed -E 's/(jwt_secret|database_url|api_key)[=:][ ]*[^ ]*/(jwt_secret|database_url|api_key)=***HIDDEN***/gi')
+    echo "$message"
+}
+
+# Logging functions with sanitization
 log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
+    local sanitized_msg=$(sanitize_log "$1")
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $sanitized_msg${NC}"
 }
 
 error() {
-    echo -e "${RED}[ERROR] $1${NC}" >&2
+    local sanitized_msg=$(sanitize_log "$1")
+    echo -e "${RED}[ERROR] $sanitized_msg${NC}" >&2
 }
 
 warn() {
-    echo -e "${YELLOW}[ADVERTENCIA] $1${NC}"
+    local sanitized_msg=$(sanitize_log "$1")
+    echo -e "${YELLOW}[WARNING] $sanitized_msg${NC}"
 }
 
 info() {
-    echo -e "${BLUE}[INFO] $1${NC}"
+    local sanitized_msg=$(sanitize_log "$1")
+    echo -e "${BLUE}[INFO] $sanitized_msg${NC}"
+}
+
+# Usage function
+show_usage() {
+    echo "Uso: $0 [MODO] [OPCIONES]"
+    echo ""
+    echo "MODOS:"
+    echo "  production    Instalación completa para producción (por defecto)"
+    echo "  development   Instalación con herramientas de desarrollo"
+    echo "  test          Instalación mínima para pruebas"
+    echo ""
+    echo "OPCIONES:"
+    echo "  --continue-from FASE    Continuar instalación desde fase específica"
+    echo "  --help                  Mostrar esta ayuda"
+    echo ""
+    echo "FASES DISPONIBLES:"
+    local all_phases=("${PHASES[@]}" "${OPTIONAL_PHASES[@]}")
+    for phase in "${all_phases[@]}"; do
+        echo "  - $phase"
+    done
+    echo ""
+    echo "EJEMPLOS:"
+    echo "  $0 production"
+    echo "  $0 development"
+    echo "  $0 --continue-from deploy-parking-system"
+    echo ""
 }
 
 # Check if running as root
@@ -35,8 +75,40 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
-# Configuration
-INSTALL_MODE="${1:-production}"
+# Parse command line arguments
+INSTALL_MODE="production"
+CONTINUE_FROM=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --continue-from)
+            CONTINUE_FROM="$2"
+            shift 2
+            ;;
+        --help|-h)
+            show_usage
+            exit 0
+            ;;
+        production|development|test)
+            INSTALL_MODE="$1"
+            shift
+            ;;
+        *)
+            if [[ "$1" =~ ^-- ]]; then
+                error "Opción desconocida: $1"
+                show_usage
+                exit 1
+            elif [[ -z "$INSTALL_MODE" || "$INSTALL_MODE" == "production" ]]; then
+                INSTALL_MODE="$1"
+            else
+                error "Argumento desconocido: $1"
+                show_usage
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
 
 # Validate installation mode
 case "$INSTALL_MODE" in
@@ -76,8 +148,27 @@ PHASES_COMPLETED=0
 PHASES_FAILED=0
 FAILED_PHASES=()
 
-# Initialize logging
-exec > >(tee -a "$INSTALL_LOG") 2>&1
+# Function to safely write to log with file locking
+write_to_log() {
+    local message="$1"
+    local lock_file="/tmp/parking-install.lock"
+    
+    # Wait for lock and write atomically
+    (
+        flock -x 200
+        echo "$message" >> "$INSTALL_LOG"
+    ) 200>"$lock_file"
+}
+
+# Initialize logging with safe concurrent access
+mkdir -p "$(dirname "$INSTALL_LOG")"
+touch "$INSTALL_LOG"
+
+# Redirect stdout and stderr to both console and log file with locking
+exec > >(while IFS= read -r line; do 
+    echo "$line"
+    write_to_log "$line"
+done) 2>&1
 
 log "=== INSTALACIÓN COMPLETA SISTEMA DE ESTACIONAMIENTO ==="
 log "Modo de instalación: $INSTALL_MODE"
@@ -142,15 +233,68 @@ check_prerequisites() {
         exit 1
     fi
     
-    # Check memory (minimum 4GB)
+    # Check memory (minimum 4GB for production)
     local memory_gb=$(free -g | awk 'NR==2{print $2}')
-    if [ "$memory_gb" -lt 4 ]; then
-        warn "Memoria RAM recomendada: 8GB. Detectada: ${memory_gb}GB"
+    local memory_mb=$(free -m | awk 'NR==2{print $2}')
+    
+    if [ "$INSTALL_MODE" = "production" ]; then
+        if [ "$memory_gb" -lt 4 ]; then
+            error "Memoria insuficiente para modo producción. Mínimo 4GB requerido, detectada: ${memory_mb}MB"
+            exit 1
+        elif [ "$memory_gb" -lt 8 ]; then
+            warn "Memoria RAM recomendada para producción: 8GB. Detectada: ${memory_gb}GB"
+            echo "¿Continuar con ${memory_gb}GB de RAM? (y/N)"
+            read -r response
+            if [[ ! "$response" =~ ^[Yy]$ ]]; then
+                error "Instalación cancelada por el usuario"
+                exit 1
+            fi
+        fi
+    else
+        if [ "$memory_gb" -lt 2 ]; then
+            warn "Memoria RAM baja para modo ${INSTALL_MODE}. Detectada: ${memory_mb}MB"
+        fi
     fi
     
-    # Check script directory structure
-    if [ ! -d "$SCRIPT_DIR/setup" ] || [ ! -d "$SCRIPT_DIR/hardware" ]; then
-        error "Estructura de directorios de scripts incompleta"
+    # Check comprehensive script directory structure
+    local required_dirs=("setup" "hardware" "security" "deploy" "backup" "test")
+    local missing_dirs=()
+    
+    for dir in "${required_dirs[@]}"; do
+        if [ ! -d "$SCRIPT_DIR/$dir" ]; then
+            missing_dirs+=("$dir")
+        fi
+    done
+    
+    if [ ${#missing_dirs[@]} -gt 0 ]; then
+        error "Estructura de directorios de scripts incompleta. Faltantes: ${missing_dirs[*]}"
+        exit 1
+    fi
+    
+    # Check for required core scripts
+    local required_scripts=(
+        "setup/setup-system.sh"
+        "setup/setup-database.sh"
+        "setup/setup-kiosk.sh"
+        "hardware/setup-printer.sh"
+        "hardware/setup-scanner.sh"
+        "security/harden-system.sh"
+        "deploy/deploy-parking-system.sh"
+        "deploy/setup-systemd-services.sh"
+    )
+    
+    local missing_scripts=()
+    for script in "${required_scripts[@]}"; do
+        if [ ! -f "$SCRIPT_DIR/$script" ]; then
+            missing_scripts+=("$script")
+        elif [ ! -x "$SCRIPT_DIR/$script" ]; then
+            warn "Script sin permisos de ejecución: $script"
+            chmod +x "$SCRIPT_DIR/$script"
+        fi
+    done
+    
+    if [ ${#missing_scripts[@]} -gt 0 ]; then
+        error "Scripts críticos faltantes: ${missing_scripts[*]}"
         exit 1
     fi
     
@@ -376,8 +520,27 @@ main() {
     
     log "Iniciando instalación de $PHASES_TOTAL fases en modo $INSTALL_MODE..."
     
-    # Execute each phase
-    for phase in "${PHASES[@]}"; do
+    # Determine starting phase
+    local start_index=0
+    if [[ -n "$CONTINUE_FROM" ]]; then
+        log "Continuando instalación desde fase: $CONTINUE_FROM"
+        for i in "${!PHASES[@]}"; do
+            if [[ "${PHASES[$i]}" == "$CONTINUE_FROM" ]]; then
+                start_index=$i
+                PHASES_COMPLETED=$i
+                log "Saltando fases completadas (0-$((i-1)))"
+                break
+            fi
+        done
+        
+        if [[ "$start_index" -eq 0 && "$CONTINUE_FROM" != "${PHASES[0]}" ]]; then
+            error "Fase '$CONTINUE_FROM' no encontrada. Fases disponibles: ${PHASES[*]}"
+        fi
+    fi
+    
+    # Execute each phase from starting index
+    for ((i=start_index; i<${#PHASES[@]}; i++)); do
+        phase="${PHASES[$i]}"
         show_progress "$phase" "$PHASES_TOTAL" "$PHASES_COMPLETED"
         
         if execute_phase "$phase"; then
