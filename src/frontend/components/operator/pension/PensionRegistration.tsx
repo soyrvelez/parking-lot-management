@@ -54,7 +54,12 @@ export default function PensionRegistration({ onRegistrationComplete, onBack }: 
       const response = await fetch('/api/parking/pricing');
       if (response.ok) {
         const result = await response.json();
-        setMonthlyRate(parseFloat(result.data.monthlyRate));
+        const rate = parseFloat(result?.data?.monthlyRate);
+        if (isNaN(rate) || rate <= 0) {
+          setError('Configuración de precios inválida');
+        } else {
+          setMonthlyRate(rate);
+        }
       } else {
         setError('Error al cargar configuración de precios');
       }
@@ -117,13 +122,14 @@ export default function PensionRegistration({ onRegistrationComplete, onBack }: 
           ...data,
           monthlyRate: monthlyRate,
           plateNumber: data.plateNumber.toUpperCase(),
-          startDate: new Date().toISOString()
+          startDate: new Date().toISOString(),
+          durationMonths: data.durationMonths
         }),
       });
 
       const result = await response.json();
 
-      if (response.ok) {
+      if (response.ok && result?.data) {
         setSuccess('¡Cliente de pensión registrado exitosamente! Redirigiendo a cobro...');
         reset();
         
@@ -131,7 +137,7 @@ export default function PensionRegistration({ onRegistrationComplete, onBack }: 
           onRegistrationComplete(result.data);
         }, 1500);
       } else {
-        const errorMessage = result.error?.message || result.message || 'Error al registrar cliente';
+        const errorMessage = result?.error?.message || result?.message || 'Error al registrar cliente';
         setError(errorMessage);
       }
     } catch (err) {
@@ -395,7 +401,7 @@ export default function PensionRegistration({ onRegistrationComplete, onBack }: 
               <>
                 <UserPlus className="w-6 h-6 sm:w-7 sm:h-7" />
                 <span className="text-base sm:text-lg lg:text-xl">
-                  Registrar y Cobrar {formatCurrency(totalAmount)}
+                  Registrar y Cobrar {formatCurrency(totalAmount)} ({watchedValues.durationMonths} {watchedValues.durationMonths === 1 ? 'mes' : 'meses'})
                 </span>
               </>
             )}

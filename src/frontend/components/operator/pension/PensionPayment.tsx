@@ -16,10 +16,19 @@ export default function PensionPayment({ customer, onPaymentComplete, onBack }: 
   const [change, setChange] = useState<Money | null>(null);
   const [isRenewal, setIsRenewal] = useState(false);
   const [renewalMonths, setRenewalMonths] = useState(1);
+  
+  // Check if this is a new registration that requires payment
+  const hasPendingPayment = customer.pendingPayment?.paymentRequired;
+  const isAlreadyPaid = customer.initialPayment?.alreadyPaid;
 
   // Use raw numbers for calculation to avoid Money class limits
   const monthlyRateValue = customer.monthlyRate;
-  const totalAmountValue = isRenewal ? monthlyRateValue * renewalMonths : monthlyRateValue;
+  const totalAmountValue = isRenewal 
+    ? monthlyRateValue * renewalMonths 
+    : (customer.pendingPayment?.totalAmount || customer.initialPayment?.totalAmount || monthlyRateValue);
+
+  // No auto-complete for new registrations - they need to make payment
+  // Auto-complete only happens if payment was actually processed elsewhere
 
   useEffect(() => {
     if (paymentAmount) {
@@ -71,9 +80,14 @@ export default function PensionPayment({ customer, onPaymentComplete, onBack }: 
     try {
       const currentValue = parseFloat(paymentAmount) || 0;
       const addValue = parseFloat(amount);
+      if (isNaN(addValue)) {
+        console.warn('Invalid amount provided to addAmount:', amount);
+        return;
+      }
       const newTotal = currentValue + addValue;
       setPaymentAmount(newTotal.toString());
     } catch (error) {
+      console.error('Error in addAmount:', error);
       setPaymentAmount(amount);
     }
   };
@@ -101,6 +115,8 @@ export default function PensionPayment({ customer, onPaymentComplete, onBack }: 
     setError('');
     setSuccess('');
 
+    let response: Response | null = null;
+    
     try {
       const endpoint = isRenewal ? `/api/pension/renew/${customer.id}` : '/api/pension/payment';
       const payload = isRenewal ? {
@@ -113,7 +129,7 @@ export default function PensionPayment({ customer, onPaymentComplete, onBack }: 
         operatorId: 'OPERATOR_001' // Required for audit logging
       };
 
-      const response = await fetch(endpoint, {
+      response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -121,20 +137,41 @@ export default function PensionPayment({ customer, onPaymentComplete, onBack }: 
         body: JSON.stringify(payload),
       });
 
-      const result = await response.json();
-
-      if (response.ok) {
-        setSuccess(isRenewal ? '¡Pensión renovada exitosamente!' : '¡Pago procesado exitosamente!');
-        
-        setTimeout(() => {
-          onPaymentComplete();
-        }, 2000);
-      } else {
-        const errorMessage = result.error?.message || result.message || 'Error al procesar el pago';
-        setError(errorMessage);
+      if (!response.ok) {
+        // Get error details from response before throwing
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        try {
+          const errorResult = await response.json();
+          errorMessage = errorResult.error?.message || errorResult.message || errorMessage;
+        } catch {
+          // Keep the original error message if JSON parsing fails
+        }
+        throw new Error(errorMessage);
       }
+
+      const result = await response.json();
+      
+      if (!result) {
+        throw new Error('Empty response from server');
+      }
+
+      // If we reach here, response was ok
+      setSuccess(isRenewal ? '¡Pensión renovada exitosamente!' : '¡Pago procesado exitosamente!');
+      
+      setTimeout(() => {
+        onPaymentComplete();
+      }, 2000);
     } catch (err) {
-      setError('Error de conexión. Verifique la red.');
+      console.error('Payment processing error:', err);
+      if (err instanceof Error) {
+        if (err.message.includes('fetch') || err.message.includes('network')) {
+          setError('Error de conexión. Verifique la red.');
+        } else {
+          setError(err.message || 'Error al procesar el pago');
+        }
+      } else {
+        setError('Error inesperado al procesar el pago');
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -234,10 +271,13 @@ export default function PensionPayment({ customer, onPaymentComplete, onBack }: 
                   />
                   <div className="flex-1">
                     <span className="block text-sm sm:text-base font-medium text-gray-900">
-                      Pago mensual regular
+                      {hasPendingPayment ? 'Pago inicial de registro' : 'Pago mensual regular'}
                     </span>
                     <span className="block text-xs sm:text-sm text-gray-600 mt-1">
-                      ${customer.monthlyRate.toFixed(2)} MXN
+                      {hasPendingPayment && customer.pendingPayment
+                        ? `${formatCurrency(customer.pendingPayment.totalAmount)} (${customer.pendingPayment.monthsToPay} ${customer.pendingPayment.monthsToPay === 1 ? 'mes' : 'meses'})`
+                        : `${formatCurrency(customer.monthlyRate || 0)} MXN`
+                      }
                     </span>
                   </div>
                 </label>

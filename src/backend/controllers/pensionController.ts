@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { Decimal } from 'decimal.js';
 import { Money } from '../../shared/utils/money';
 import { i18n } from '../../shared/localization';
 import { BusinessLogicError, HardwareError } from '../middleware/errorHandler';
@@ -243,10 +244,12 @@ export class PensionController {
       // Generate pension barcode
       const pensionBarcode = `PENSION-${plateNumber.toUpperCase()}`;
 
-      // Create pension customer with initial payment and cash flow integration
-      let cashRegisterUpdated = false;
+      // For pension registration, calculate the expected total but don't process payment yet
+      const expectedTotalAmount = new Decimal(monthlyRate).mul(durationMonths);
+
+      // Create pension customer record without processing payment (payment happens on payment screen)
       const customer = await withAtomicRetry(prisma, async (tx) => {
-        // Create pension customer
+        // Create pension customer with future end date but no payment yet
         const newCustomer = await tx.pensionCustomer.create({
           data: {
             name,
@@ -256,85 +259,16 @@ export class PensionController {
             vehicleModel,
             monthlyRate,
             startDate,
-            endDate,
-            isActive: true
+            endDate, // Set the end date but don't activate until payment
+            isActive: false // Customer not active until payment is made
           }
         });
-
-        // Create initial payment transaction
-        await tx.transaction.create({
-          data: {
-            type: 'PENSION',
-            amount: monthlyRate,
-            pensionId: newCustomer.id,
-            description: i18n.t('transaction.pension_payment', { 
-              customerName: newCustomer.name 
-            }),
-            operatorId
-          }
-        });
-
-        // Update cash register balance with initial pension payment
-        const openCashRegister = await tx.cashRegister.findFirst({
-          where: {
-            operatorId,
-            status: 'OPEN'
-          }
-        });
-
-        if (openCashRegister) {
-          // Create cash flow record for the initial pension payment
-          await tx.cashFlow.create({
-            data: {
-              type: 'DEPOSIT',
-              amount: monthlyRate,
-              reason: `Registro pensión - Cliente: ${newCustomer.name} (${newCustomer.plateNumber})`,
-              performedBy: operatorId,
-              cashRegisterId: openCashRegister.id,
-              timestamp: new Date()
-            }
-          });
-
-          // Update cash register balance
-          const currentBalance = new Money(openCashRegister.currentBalance);
-          const paymentAmount = Money.fromNumber(monthlyRate);
-          const newBalance = currentBalance.add(paymentAmount);
-          
-          await tx.cashRegister.update({
-            where: { id: openCashRegister.id },
-            data: {
-              currentBalance: newBalance.toDatabase(),
-              lastUpdated: new Date()
-            }
-          });
-
-          cashRegisterUpdated = true;
-        } else {
-          console.warn(`No open cash register found for operator ${operatorId} - pension registration payment not added to cash flow`);
-        }
 
         return newCustomer;
       });
 
-      // Print pension customer card
-      try {
-        await this.printerService.printPensionReceipt({
-          ticketNumber: customer.id,
-          plateNumber: customer.plateNumber,
-          customerName: customer.name,
-          monthlyRate: monthlyRate,
-          startDate: startDate,
-          endDate: endDate,
-          totalAmount: monthlyRate,
-          cashReceived: monthlyRate,
-          change: 0,
-          type: 'PENSION'
-        });
-      } catch (printError) {
-        console.error('Failed to print pension card:', printError);
-      }
-
-      // Log creation
+      // Note: Printing and payment processing will happen on the payment screen
+      // Log customer creation (without payment details)
       auditLogger('PENSION_CUSTOMER_CREATED', operatorId, {
         customerId: customer.id,
         name: customer.name,
@@ -343,15 +277,25 @@ export class PensionController {
           ? Money.fromNumber(monthlyRate).formatPesos()
           : `$${monthlyRate.toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} pesos`,
         duration: `${durationMonths} meses`,
-        cashRegisterUpdated
+        status: 'AWAITING_PAYMENT'
       });
 
       const customerData = this.formatCustomerResponse(customer);
 
       res.status(201).json({
         success: true,
-        data: customerData,
-        message: 'Cliente de pensión creado exitosamente',
+        data: {
+          ...customerData,
+          pendingPayment: {
+            totalAmount: expectedTotalAmount.toNumber(),
+            monthsToPay: durationMonths,
+            monthlyRate: monthlyRate,
+            durationMonths: durationMonths,
+            alreadyPaid: false,
+            paymentRequired: true
+          }
+        },
+        message: 'Cliente de pensión creado exitosamente - Proceder al cobro',
         timestamp: new Date().toISOString()
       });
 
@@ -380,39 +324,54 @@ export class PensionController {
         );
       }
 
-      if (!customer.isActive) {
-        throw new BusinessLogicError(
-          'Cliente de pensión inactivo',
-          'PENSION_CUSTOMER_INACTIVE',
-          400,
-          { customerId }
-        );
-      }
+      // Note: Inactive customers are allowed for initial payments
+      // Only reject if customer was explicitly deactivated by admin
+      // For now, we allow all payment processing as inactive customers
+      // may be new registrations awaiting their first payment
 
-      // Handle large amounts safely for monthly payments
-      const monthlyRate = customer.monthlyRate.toNumber() <= 9999.99
-        ? Money.fromNumber(customer.monthlyRate.toNumber())
-        : new Money(customer.monthlyRate.toString(), false);
+      // Determine payment amount required based on customer status
+      let requiredAmount: Money;
+      let transactionAmount: number;
+      
+      if (!customer.isActive) {
+        // This is an initial payment - calculate based on time between start and end dates
+        const startDate = new Date(customer.startDate);
+        const endDate = new Date(customer.endDate);
+        const monthsDiff = Math.round((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24 * 30));
+        const totalAmount = customer.monthlyRate.toNumber() * monthsDiff;
+        
+        requiredAmount = totalAmount <= 9999.99
+          ? Money.fromNumber(totalAmount)
+          : new Money(totalAmount.toString(), false);
+        transactionAmount = totalAmount;
+      } else {
+        // Regular monthly payment
+        const monthlyRateValue = customer.monthlyRate.toNumber();
+        requiredAmount = monthlyRateValue <= 9999.99
+          ? Money.fromNumber(monthlyRateValue)
+          : new Money(customer.monthlyRate.toString(), false);
+        transactionAmount = monthlyRateValue;
+      }
       
       const cashGiven = cashReceived <= 9999.99 
         ? Money.fromNumber(cashReceived)
         : new Money(cashReceived.toString(), false);
 
       // Validate payment amount
-      if (cashGiven.lessThan(monthlyRate)) {
+      if (cashGiven.lessThan(requiredAmount)) {
         throw new BusinessLogicError(
           i18n.t('parking.insufficient_payment'),
           'INSUFFICIENT_PAYMENT',
           400,
           { 
-            required: monthlyRate.formatPesos(),
+            required: requiredAmount.formatPesos(),
             received: cashGiven.formatPesos(),
-            shortfall: monthlyRate.subtract(cashGiven).formatPesos()
+            shortfall: requiredAmount.subtract(cashGiven).formatPesos()
           }
         );
       }
 
-      const changeAmount = cashGiven.subtract(monthlyRate);
+      const changeAmount = cashGiven.subtract(requiredAmount);
 
       // Process payment with cash flow integration
       let cashRegisterUpdated = false;
@@ -421,11 +380,11 @@ export class PensionController {
         const transaction = await tx.transaction.create({
           data: {
             type: 'PENSION',
-            amount: monthlyRate.toNumber(),
+            amount: transactionAmount,
             pensionId: customer.id,
-            description: i18n.t('transaction.pension_payment', { 
-              customerName: customer.name 
-            }),
+            description: !customer.isActive 
+              ? `Pago inicial pensión - ${customer.name}` 
+              : i18n.t('transaction.pension_payment', { customerName: customer.name }),
             operatorId
           }
         });
@@ -443,8 +402,10 @@ export class PensionController {
           await tx.cashFlow.create({
             data: {
               type: 'DEPOSIT',
-              amount: monthlyRate.toDatabase(),
-              reason: `Pago pensión - Cliente: ${customer.name} (${customer.plateNumber})`,
+              amount: transactionAmount,
+              reason: !customer.isActive 
+                ? `Pago inicial pensión - Cliente: ${customer.name} (${customer.plateNumber})`
+                : `Pago pensión - Cliente: ${customer.name} (${customer.plateNumber})`,
               performedBy: operatorId,
               cashRegisterId: openCashRegister.id,
               timestamp: new Date()
@@ -453,7 +414,7 @@ export class PensionController {
 
           // Update cash register balance
           const currentBalance = new Money(openCashRegister.currentBalance);
-          const newBalance = currentBalance.add(monthlyRate);
+          const newBalance = currentBalance.add(requiredAmount);
           
           await tx.cashRegister.update({
             where: { id: openCashRegister.id },
@@ -468,9 +429,19 @@ export class PensionController {
           console.warn(`No open cash register found for operator ${operatorId} - pension payment not added to cash flow`);
         }
 
-        // Extend pension if currently active (add 1 month)
+        // Handle different payment scenarios
         let updatedCustomer = customer;
-        if (new Date() < customer.endDate) {
+        
+        if (!customer.isActive) {
+          // This is an initial payment for a newly registered customer
+          // The endDate was already set during registration, just activate the customer
+          updatedCustomer = await tx.pensionCustomer.update({
+            where: { id: customerId },
+            data: { 
+              isActive: true
+            }
+          });
+        } else if (new Date() < customer.endDate) {
           // Customer is current, extend by 1 month
           const newEndDate = new Date(customer.endDate);
           newEndDate.setMonth(newEndDate.getMonth() + 1);
@@ -507,10 +478,10 @@ export class PensionController {
           ticketNumber: result.customer.id,
           plateNumber: result.customer.plateNumber,
           customerName: result.customer.name,
-          monthlyRate: monthlyRate.toNumber(),
+          monthlyRate: customer.monthlyRate.toNumber(),
           startDate: result.customer.startDate,
           endDate: result.customer.endDate,
-          totalAmount: monthlyRate.toNumber(),
+          totalAmount: transactionAmount,
           cashReceived: cashGiven.toNumber(),
           change: changeAmount.toNumber(),
           type: 'PENSION'
@@ -524,10 +495,11 @@ export class PensionController {
         customerId: result.customer.id,
         customerName: result.customer.name,
         plateNumber: result.customer.plateNumber,
-        amount: monthlyRate.formatPesos(),
+        amount: requiredAmount.formatPesos(),
         cashReceived: cashGiven.formatPesos(),
         changeGiven: changeAmount.formatPesos(),
         validUntil: i18n.formatDate(result.customer.endDate),
+        paymentType: !customer.isActive ? 'INITIAL_PAYMENT' : 'MONTHLY_PAYMENT',
         cashRegisterUpdated
       });
 
@@ -538,14 +510,17 @@ export class PensionController {
         data: {
           customer: customerData,
           payment: {
-            amount: monthlyRate.formatPesos(),
+            amount: requiredAmount.formatPesos(),
             cashReceived: cashGiven.formatPesos(),
             changeGiven: changeAmount.formatPesos(),
             validUntil: i18n.formatDate(result.customer.endDate),
+            paymentType: !customer.isActive ? 'INITIAL_PAYMENT' : 'MONTHLY_PAYMENT',
             cashRegisterUpdated
           }
         },
-        message: 'Pago de pensión procesado exitosamente',
+        message: !customer.isActive 
+          ? 'Pago inicial de pensión procesado exitosamente'
+          : 'Pago de pensión procesado exitosamente',
         timestamp: new Date().toISOString()
       });
 
