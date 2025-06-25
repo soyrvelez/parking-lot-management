@@ -48,46 +48,47 @@
 ```
 
 ### 0.3 Crear Archivo de Configuración de Producción
+
+**📖 PARA CONFIGURACIÓN DETALLADA**: Revisar `ENV_SETUP_GUIDE.md` (guía completa para usuarios no técnicos)
+
 ```bash
 # En MacBook - crear .env.production desde template
 [ ] cd /Users/velez/dev/parking-lot-management
 [ ] cp .env.production.template .env.production
 
+# Revisar guía detallada para no técnicos
+[ ] open ENV_SETUP_GUIDE.md
+
 # Editar .env.production para producción
 [ ] nano .env.production
 ```
 
-**Variables CRÍTICAS que DEBES cambiar en .env.production:**
+**⚡ CONFIGURACIÓN RÁPIDA (variables críticas):**
 
-1. **DATABASE_URL**: Cambiar password por uno seguro
-   ```
-   "postgresql://parking_user:TU_PASSWORD_SEGURO@localhost:5432/parking_lot_prod"
-   ```
+1. **DATABASE_URL**: `"postgresql://parking_user:TU_PASSWORD_SEGURO@localhost:5432/parking_lot_prod"`
+2. **JWT_SECRET**: Ejecutar `openssl rand -hex 32` y copiar resultado
+3. **PRINTER_INTERFACE_TYPE**: `"usb"` (recomendado) o `"network"`
+4. **CORS_ORIGIN**: `"http://[IP_THINKPAD_FINAL]"`
 
-2. **JWT_SECRET**: Generar clave secreta aleatoria (32+ caracteres)
-   ```bash
-   # Generar JWT secret aleatorio:
-   [ ] openssl rand -hex 32
-   # Copiar resultado al archivo .env.production
-   ```
+**🚚 IMPORTANTE - INSTALACIÓN vs UBICACIÓN FINAL:**
 
-3. **Configuración de impresora**: Elegir USB o Red
-   - **USB (recomendado)**: `PRINTER_INTERFACE_TYPE="usb"` y `PRINTER_DEVICE_PATH="/dev/usb/lp0"`
-   - **Red**: `PRINTER_INTERFACE_TYPE="network"` y `PRINTER_HOST="192.168.1.100"`
+**✅ Opción A: Impresora USB (recomendado)**
+- Instalar en cualquier red
+- Mover equipo sin reconfiguración
+- Solo actualizar IPs si es necesario
 
-4. **IPs de red**: Verificar que coincidan con tu configuración
-   - ThinkPad IP: `192.168.1.50`
-   - CORS_ORIGIN: `http://192.168.1.50`
+**⚠️ Opción B: Impresora de Red**
+- Conseguir IPs de red final ANTES de instalación
+- Configurar .env.production con IPs definitivas
+- O planificar reconfiguración después del traslado
 
-**Ejemplo de configuración final (USB):**
+**Ejemplo configuración portable (USB):**
 ```bash
-DATABASE_URL="postgresql://parking_user:MySecure2024Pass!@localhost:5432/parking_lot_prod"
-JWT_SECRET="a1b2c3d4e5f6789012345678901234567890abcdef1234567890"
-NODE_ENV="production"
+DATABASE_URL="postgresql://parking_user:Estac2024!Seguro@localhost:5432/parking_lot_prod"
+JWT_SECRET="f4e3d2c1b0a9876543210fedcba9876543210abcdef0123456789"
 PRINTER_INTERFACE_TYPE="usb"
 PRINTER_DEVICE_PATH="/dev/usb/lp0"
-CORS_ORIGIN="http://192.168.1.50"
-# ... resto de configuración desde template
+CORS_ORIGIN="http://192.168.1.50"  # Actualizar con IP final
 ```
 
 ### 0.4 Transferir Archivos de Configuración
@@ -443,6 +444,48 @@ CORS_ORIGIN="http://192.168.1.50"
 
 ---
 
-**Fecha de Despliegue**: ******\_\_\_******
-**Técnico Responsable**: ******\_\_\_******
-**Firma de Conformidad**: ******\_\_\_******
+## 🚚 APÉNDICE: CAMBIO DE RED DESPUÉS DEL DESPLIEGUE
+
+### Escenario: Equipo instalado en oficina, movido a ubicación final
+
+**SI USASTE IMPRESORA USB (recomendado):**
+```bash
+# 1. Solo actualizar IPs si es necesario
+[ ] ssh parking@[IP_ACTUAL] "sudo nano /opt/parking-system/.env"
+
+# 2. Cambiar estas líneas:
+CORS_ORIGIN="http://[NUEVA_IP_THINKPAD]"
+FRONTEND_URL="http://[NUEVA_IP_THINKPAD]"
+
+# 3. Reiniciar servicio
+[ ] ssh parking@[IP_ACTUAL] "sudo systemctl restart parking-system"
+
+# 4. Verificar funcionamiento
+[ ] curl http://[NUEVA_IP_THINKPAD]/health
+```
+
+**SI USASTE IMPRESORA DE RED:**
+```bash
+# 1. Actualizar tanto ThinkPad como impresora
+[ ] ssh parking@[IP_ACTUAL] "sudo nano /opt/parking-system/.env"
+
+# 2. Cambiar estas líneas:
+CORS_ORIGIN="http://[NUEVA_IP_THINKPAD]"
+FRONTEND_URL="http://[NUEVA_IP_THINKPAD]"
+PRINTER_HOST="[NUEVA_IP_IMPRESORA]"
+
+# 3. Reiniciar y verificar
+[ ] ssh parking@[IP_ACTUAL] "sudo systemctl restart parking-system"
+[ ] curl http://[NUEVA_IP_THINKPAD]/health
+```
+
+**📖 Para más detalles**: Consultar `ENV_SETUP_GUIDE.md` sección "PROCESO DE TRASLADO"
+
+---
+
+**Fecha de Despliegue**: _______________  
+**Técnico Responsable**: _______________  
+**Red de Instalación**: _______________  
+**Red Final (si diferente)**: _______________  
+**Tipo de Impresora**: [ ] USB [ ] Red  
+**Firma de Conformidad**: _______________
