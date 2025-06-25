@@ -71,17 +71,21 @@
    # Copiar resultado al archivo .env.production
    ```
 
-3. **IPs de red**: Verificar que coincidan con tu configuración
+3. **Configuración de impresora**: Elegir USB o Red
+   - **USB (recomendado)**: `PRINTER_INTERFACE_TYPE="usb"` y `PRINTER_DEVICE_PATH="/dev/usb/lp0"`
+   - **Red**: `PRINTER_INTERFACE_TYPE="network"` y `PRINTER_HOST="192.168.1.100"`
+
+4. **IPs de red**: Verificar que coincidan con tu configuración
    - ThinkPad IP: `192.168.1.50`
-   - Printer IP: `192.168.1.100`
    - CORS_ORIGIN: `http://192.168.1.50`
 
-**Ejemplo de configuración final:**
+**Ejemplo de configuración final (USB):**
 ```bash
 DATABASE_URL="postgresql://parking_user:MySecure2024Pass!@localhost:5432/parking_lot_prod"
 JWT_SECRET="a1b2c3d4e5f6789012345678901234567890abcdef1234567890"
 NODE_ENV="production"
-PRINTER_HOST="192.168.1.100"
+PRINTER_INTERFACE_TYPE="usb"
+PRINTER_DEVICE_PATH="/dev/usb/lp0"
 CORS_ORIGIN="http://192.168.1.50"
 # ... resto de configuración desde template
 ```
