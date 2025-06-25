@@ -73,11 +73,11 @@ ssh-keygen -t ed25519 -C "estacionamiento@tuempresa.com"
 # 2. Presionar ENTER 3 veces (acepta valores por defecto)
 
 # 3. Copiar clave al ThinkPad (reemplazar IP_THINKPAD)
-ssh-copy-id parking@IP_THINKPAD
+ssh-copy-id administrador@IP_THINKPAD
 
 # 4. Probar conexión
-ssh parking@IP_THINKPAD "whoami"
-# Debe responder: parking
+ssh administrador@IP_THINKPAD "whoami"
+# Debe responder: administrador
 ```
 
 **🔍 ¿Cómo conseguir IP_THINKPAD?**
@@ -89,15 +89,15 @@ ssh parking@IP_THINKPAD "whoami"
 
 ```bash
 # Conectar al ThinkPad desde MacBook
-ssh parking@IP_THINKPAD
+ssh administrador@IP_THINKPAD
 
 # Una vez conectado, ejecutar en ThinkPad:
 # 1. Instalar git si no está
 sudo apt update && sudo apt install -y git
 
 # 2. Crear directorio y descargar código
-mkdir -p /home/parking/deployments
-cd /home/parking/deployments
+mkdir -p /home/administrador/deployments
+cd /home/administrador/deployments
 
 # 3. Clonar repositorio (reemplazar con tu URL real)
 git clone https://github.com/TU_USUARIO/parking-lot-management.git
@@ -249,10 +249,10 @@ GRACE_PERIOD_MINUTES=15
 
 ```bash
 # Desde MacBook - copiar archivo al ThinkPad
-scp .env.production parking@IP_THINKPAD:/home/parking/deployments/parking-lot-management/.env
+scp .env.production administrador@IP_THINKPAD:/home/administrador/deployments/parking-lot-management/.env
 
 # Verificar que se copió
-ssh parking@IP_THINKPAD "ls -la /home/parking/deployments/parking-lot-management/.env"
+ssh administrador@IP_THINKPAD "ls -la /home/administrador/deployments/parking-lot-management/.env"
 ```
 
 ---
@@ -263,7 +263,7 @@ ssh parking@IP_THINKPAD "ls -la /home/parking/deployments/parking-lot-management
 
 ```bash
 # Conectar al ThinkPad con screen para sesión persistente
-ssh parking@IP_THINKPAD
+ssh administrador@IP_THINKPAD
 
 # Instalar screen para mantener sesión activa
 sudo apt install -y screen
@@ -272,7 +272,7 @@ sudo apt install -y screen
 screen -S instalacion
 
 # Navegar al directorio del proyecto
-cd /home/parking/deployments/parking-lot-management
+cd /home/administrador/deployments/parking-lot-management
 ```
 
 ### **Paso 3.2: Ejecutar instalación**
@@ -280,7 +280,7 @@ cd /home/parking/deployments/parking-lot-management
 ```bash
 # Verificar que estás en el directorio correcto
 pwd
-# Debe mostrar: /home/parking/deployments/parking-lot-management
+# Debe mostrar: /home/administrador/deployments/parking-lot-management
 
 # Ejecutar instalación completa
 sudo ./scripts/install-all.sh production
@@ -302,7 +302,7 @@ La instalación progresará por 10 fases:
 
 **💡 Consejos durante instalación:**
 - Puedes cerrar Terminal de MacBook, la instalación seguirá
-- Para reconectar: `ssh parking@IP_THINKPAD` luego `screen -r instalacion`
+- Para reconectar: `ssh administrador@IP_THINKPAD` luego `screen -r instalacion`
 - Si hay errores, el script te dirá cómo continuar
 
 ### **Paso 3.3: Si la instalación falla**
@@ -356,7 +356,7 @@ open http://IP_THINKPAD
 
 ```bash
 # Ejecutar verificación completa
-ssh parking@IP_THINKPAD "/home/parking/deployments/parking-lot-management/scripts/verify-deployment.sh"
+ssh administrador@IP_THINKPAD "/home/administrador/deployments/parking-lot-management/scripts/verify-deployment.sh"
 
 # Debe mostrar resultados de todas las verificaciones
 ```
@@ -398,22 +398,22 @@ ssh parking@IP_THINKPAD "/home/parking/deployments/parking-lot-management/script
 ```bash
 # Conectar impresora con cable USB al ThinkPad
 # Verificar que se detecta
-ssh parking@IP_THINKPAD "lsusb | grep -i epson"
+ssh administrador@IP_THINKPAD "lsusb | grep -i epson"
 
 # Probar impresión
-ssh parking@IP_THINKPAD "echo 'PRUEBA DE IMPRESORA' > /dev/usb/lp0"
+ssh administrador@IP_THINKPAD "echo 'PRUEBA DE IMPRESORA' > /dev/usb/lp0"
 ```
 
 **Si usas Red:**
 ```bash
 # Verificar conectividad de impresora
-ssh parking@IP_THINKPAD "ping -c 3 IP_IMPRESORA"
+ssh administrador@IP_THINKPAD "ping -c 3 IP_IMPRESORA"
 
 # Probar puerto de impresión
-ssh parking@IP_THINKPAD "nc -zv IP_IMPRESORA 9100"
+ssh administrador@IP_THINKPAD "nc -zv IP_IMPRESORA 9100"
 
 # Probar impresión
-ssh parking@IP_THINKPAD "echo 'PRUEBA DE IMPRESORA' | nc IP_IMPRESORA 9100"
+ssh administrador@IP_THINKPAD "echo 'PRUEBA DE IMPRESORA' | nc IP_IMPRESORA 9100"
 ```
 
 ### **Paso 5.2: Verificar scanner**
@@ -421,7 +421,7 @@ ssh parking@IP_THINKPAD "echo 'PRUEBA DE IMPRESORA' | nc IP_IMPRESORA 9100"
 ```bash
 # Conectar scanner con cable USB al ThinkPad
 # Verificar que se detecta
-ssh parking@IP_THINKPAD "lsusb | grep -i honeywell"
+ssh administrador@IP_THINKPAD "lsusb | grep -i honeywell"
 
 # Probar scanner:
 # 1. Abrir aplicación web
@@ -444,7 +444,7 @@ ssh parking@IP_THINKPAD "lsusb | grep -i honeywell"
 
 ```bash
 # Conectar al ThinkPad con nueva IP
-ssh parking@NUEVA_IP_THINKPAD
+ssh administrador@NUEVA_IP_THINKPAD
 
 # Editar configuración
 sudo nano /opt/parking-system/.env
@@ -518,7 +518,7 @@ echo "PRUEBA NUEVA RED" | nc NUEVA_IP_IMPRESORA 9100
 3. Escribir boletos a mano temporalmente
 
 **Contacto de soporte:**
-- SSH desde MacBook: `ssh parking@IP_THINKPAD`
+- SSH desde MacBook: `ssh administrador@IP_THINKPAD`
 - Reiniciar servicio: `sudo systemctl restart parking-system`
 - Ver errores: `sudo journalctl -u parking-system --lines 20`
 
@@ -534,39 +534,39 @@ echo "PRUEBA NUEVA RED" | nc NUEVA_IP_IMPRESORA 9100
 curl http://IP_THINKPAD/health
 
 # Ver estado de servicios
-ssh parking@IP_THINKPAD "sudo systemctl status parking-system"
+ssh administrador@IP_THINKPAD "sudo systemctl status parking-system"
 
 # Ver espacio en disco
-ssh parking@IP_THINKPAD "df -h"
+ssh administrador@IP_THINKPAD "df -h"
 ```
 
 ### **Paso 8.2: Respaldos automáticos**
 
 ```bash
 # Verificar que respaldos funcionan
-ssh parking@IP_THINKPAD "ls -la /var/backups/parking/"
+ssh administrador@IP_THINKPAD "ls -la /var/backups/parking/"
 
 # Ejecutar respaldo manual
-ssh parking@IP_THINKPAD "sudo /opt/parking-backup.sh"
+ssh administrador@IP_THINKPAD "sudo /opt/parking-backup.sh"
 ```
 
 ### **Paso 8.3: Comandos útiles de soporte**
 
 ```bash
 # Reiniciar sistema completo
-ssh parking@IP_THINKPAD "sudo reboot"
+ssh administrador@IP_THINKPAD "sudo reboot"
 
 # Reiniciar solo aplicación
-ssh parking@IP_THINKPAD "sudo systemctl restart parking-system"
+ssh administrador@IP_THINKPAD "sudo systemctl restart parking-system"
 
 # Ver logs de errores
-ssh parking@IP_THINKPAD "sudo journalctl -u parking-system -f"
+ssh administrador@IP_THINKPAD "sudo journalctl -u parking-system -f"
 
 # Ver uso de memoria
-ssh parking@IP_THINKPAD "free -h"
+ssh administrador@IP_THINKPAD "free -h"
 
 # Ver procesos de la aplicación
-ssh parking@IP_THINKPAD "ps aux | grep parking"
+ssh administrador@IP_THINKPAD "ps aux | grep parking"
 ```
 
 ---
@@ -613,7 +613,7 @@ ssh parking@IP_THINKPAD "ps aux | grep parking"
 4. **Pensiones cobran mal**: Sistema ya corregido, debe cobrar monto × duración
 
 ### **Para emergencias:**
-- Acceso remoto: `ssh parking@IP_THINKPAD`
+- Acceso remoto: `ssh administrador@IP_THINKPAD`
 - Logs de error: `sudo journalctl -u parking-system --lines 50`
 - Reinicio completo: `sudo reboot`
 
@@ -621,7 +621,7 @@ ssh parking@IP_THINKPAD "ps aux | grep parking"
 - Configuración: `/opt/parking-system/.env`
 - Logs: `/var/log/parking-system/`
 - Respaldos: `/var/backups/parking/`
-- Scripts: `/home/parking/deployments/parking-lot-management/scripts/`
+- Scripts: `/home/administrador/deployments/parking-lot-management/scripts/`
 
 ---
 
