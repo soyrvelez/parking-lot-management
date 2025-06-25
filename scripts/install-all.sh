@@ -208,7 +208,10 @@ show_progress() {
     
     local percentage=$((completed_phases * 100 / total_phases))
     local elapsed_time=$(($(date +%s) - START_TIME))
-    local eta=$((elapsed_time * total_phases / completed_phases - elapsed_time))
+    local eta=0
+    if [ "$completed_phases" -gt 0 ]; then
+        eta=$((elapsed_time * total_phases / completed_phases - elapsed_time))
+    fi
     
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"
