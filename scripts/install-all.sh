@@ -37,6 +37,15 @@ fi
 
 # Configuration
 INSTALL_MODE="${1:-production}"
+
+# Validate installation mode
+case "$INSTALL_MODE" in
+    production|development|test)
+        ;;
+    *)
+        error "Modo de instalación inválido: $INSTALL_MODE. Usar: production, development, o test"
+        ;;
+esac
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_LOG="/var/log/parking-installation-$(date +%Y%m%d_%H%M%S).log"
 START_TIME=$(date +%s)
@@ -206,7 +215,10 @@ show_progress() {
     local total_phases="$2"
     local completed_phases="$3"
     
-    local percentage=$((completed_phases * 100 / total_phases))
+    local percentage=0
+    if [ "$total_phases" -gt 0 ]; then
+        percentage=$((completed_phases * 100 / total_phases))
+    fi
     local elapsed_time=$(($(date +%s) - START_TIME))
     local eta=0
     if [ "$completed_phases" -gt 0 ]; then

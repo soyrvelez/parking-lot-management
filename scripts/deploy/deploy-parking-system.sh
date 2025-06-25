@@ -38,7 +38,7 @@ fi
 # Configuration
 DEPLOYMENT_MODE="${1:-production}"
 APP_DIR="/opt/parking-system"
-REPO_URL="https://github.com/usuario/parking-lot-management.git"  # Update with actual repo
+REPO_URL="${REPO_URL:-/home/parking/deployments/parking-lot-management}"  # Use local copy by default
 SERVICE_USER="parking"
 WEB_PORT="3000"
 API_PORT="3001"

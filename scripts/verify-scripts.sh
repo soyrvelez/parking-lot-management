@@ -49,7 +49,7 @@ echo "ADDITIONAL SCRIPTS FOUND:"
 echo "========================"
 find . -name "*.sh" | grep -v "./verify-scripts.sh" | while read -r file; do
     rel_path="${file#./}"
-    if [[ \! "${scripts[$rel_path]+isset}" ]]; then
+    if [[ ! "${scripts[$rel_path]+isset}" ]]; then
         echo "• $rel_path"
     fi
 done | sort
