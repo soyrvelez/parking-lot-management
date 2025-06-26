@@ -41,10 +41,10 @@ log "=== CONFIGURACIÓN DE BASE DE DATOS - POSTGRESQL ==="
 DB_PASSWORD="ParkingMexico$(openssl rand -base64 12 | tr -d '+=/' | head -c 16)"
 BACKUP_USER_PASSWORD="BackupParking$(openssl rand -base64 12 | tr -d '+=/' | head -c 16)"
 
-# Install PostgreSQL 14
-log "Instalando PostgreSQL 14..."
+# Install PostgreSQL (latest available version)
+log "Instalando PostgreSQL..."
 apt update
-apt install -y postgresql-14 postgresql-contrib-14 postgresql-client-14
+apt install -y postgresql postgresql-contrib postgresql-client
 
 # Start and enable PostgreSQL service
 log "Iniciando servicios de PostgreSQL..."
@@ -97,9 +97,10 @@ EOF
 # Configure PostgreSQL for performance and security
 log "Optimizando configuración de PostgreSQL..."
 
-# Get PostgreSQL version and config path
-PG_VERSION="14"
+# Get PostgreSQL version and config path dynamically
+PG_VERSION=$(sudo -u postgres psql -t -c "SELECT version();" | grep -oP 'PostgreSQL \K[0-9]+' | head -1)
 PG_CONFIG_PATH="/etc/postgresql/$PG_VERSION/main"
+log "Detectada versión de PostgreSQL: $PG_VERSION"
 
 # Backup original configuration
 cp "$PG_CONFIG_PATH/postgresql.conf" "$PG_CONFIG_PATH/postgresql.conf.backup"
