@@ -332,6 +332,19 @@ echo "=== SSH CONFIGURADO EXITOSAMENTE ==="
 
 #### **Troubleshooting SSH**
 
+**Si ves el error "REMOTE HOST IDENTIFICATION HAS CHANGED":**
+```bash
+# En tu MacBook - remover clave antigua
+ssh-keygen -R IP_DEL_THINKPAD
+
+# O editar manualmente
+nano ~/.ssh/known_hosts
+# Borrar la línea con IP_DEL_THINKPAD
+
+# Reconectar (dirá "yes" para aceptar nueva clave)
+ssh administrador@IP_DEL_THINKPAD
+```
+
 **Si no puedes conectar:**
 ```bash
 # En el ThinkPad - verificar SSH funciona
@@ -631,6 +644,27 @@ grep -n "=" .env | wc -l
 
 **✅ Debe mostrar:** Un número alrededor de 35-40 (líneas con configuración)
 
+#### **⚠️ IMPORTANTE: Configuración de .env con comillas**
+
+**✅ FORMATO CORRECTO (con comillas):**
+```bash
+DATABASE_URL="postgresql://parking_user:MiPassword123!@localhost:5432/parking_lot_prod"
+JWT_SECRET="a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456"
+CORS_ORIGIN="http://192.168.100.156"
+```
+
+**❌ FORMATO INCORRECTO (sin comillas):**
+```bash
+DATABASE_URL=postgresql://parking_user:MiPassword123!@localhost:5432/parking_lot_prod
+JWT_SECRET=a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef123456
+CORS_ORIGIN=http://192.168.100.156
+```
+
+**📝 Reglas de comillas:**
+- **Contraseñas y URLs**: SIEMPRE con comillas (contienen caracteres especiales)
+- **Números**: Sin comillas (`API_PORT=4000`)
+- **Booleanos**: Sin comillas (`KIOSK_MODE=true`)
+
 ---
 
 ## 🏗️ FASE 3: INSTALACIÓN DEL SISTEMA (90-120 min)
@@ -661,6 +695,46 @@ sudo ./scripts/preflight-check.sh
 - ✓ Red: conexión activa
 
 **❌ Si hay errores:** Resolver antes de continuar
+
+#### **Troubleshooting Scripts de Verificación**
+
+**Si ubuntu-24-compatibility-check.sh se detiene después del primer paso:**
+```bash
+# Verificar que el script tiene permisos
+ls -la scripts/ubuntu-24-compatibility-check.sh
+chmod +x scripts/ubuntu-24-compatibility-check.sh
+
+# Ejecutar en modo debug para ver errores
+bash -x scripts/ubuntu-24-compatibility-check.sh
+```
+
+**Si aparece error "$2: variable sin asignar":**
+```bash
+# Esto indica problema con funciones de logging
+# Verificar que el repositorio está actualizado
+git status
+git pull
+
+# Si persiste, ejecutar scripts individualmente:
+# 1. Verificar PostgreSQL manualmente
+apt search postgresql-16 postgresql-14
+
+# 2. Verificar Node.js
+apt show nodejs | grep Version
+
+# 3. Verificar display manager
+systemctl status gdm3 lightdm
+```
+
+**Si preflight-check.sh falla:**
+```bash
+# Ver error específico
+sudo ./scripts/preflight-check.sh 2>&1 | tail -20
+
+# Verificar shared libraries
+ls -la scripts/lib/
+source scripts/lib/logging.sh && echo "Logging OK"
+```
 
 ### **PASO 3.2: Crear sesión persistente**
 
