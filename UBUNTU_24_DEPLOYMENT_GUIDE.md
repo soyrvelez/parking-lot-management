@@ -152,10 +152,13 @@ ping -c 4 8.8.8.8
 
 **✅ Debe mostrar:** "4 packets transmitted, 4 received"
 
-### **PASO 1.5: Habilitar SSH para instalación remota**
+### **PASO 1.5: Configurar SSH para instalación remota**
+
+#### **Parte A: Configurar SSH en el ThinkPad**
 
 ```bash
-# 1. Iniciar servicio SSH
+# 1. Instalar y iniciar servicio SSH
+sudo apt install -y openssh-server
 sudo systemctl start ssh
 sudo systemctl enable ssh
 
@@ -166,17 +169,192 @@ sudo systemctl status ssh
 **✅ Debe mostrar:** "active (running)"
 
 ```bash
-# 3. Configurar firewall
+# 3. Configurar firewall para SSH
 sudo ufw allow 22/tcp
 sudo ufw --force enable
 
-# 4. Obtener IP para conexión remota
-hostname -I
+# 4. Verificar configuración SSH
+sudo nano /etc/ssh/sshd_config
 ```
 
-**📝 Desde tu MacBook ahora puedes conectar con:**
+**📝 Verificar estas líneas en sshd_config:**
+```
+Port 22
+PermitRootLogin no
+PasswordAuthentication yes
+PubkeyAuthentication yes
+```
+
 ```bash
+# 5. Reiniciar SSH con nueva configuración
+sudo systemctl restart ssh
+
+# 6. Obtener IP del ThinkPad para conexión remota
+hostname -I
+ip addr show | grep "inet " | grep -v "127.0.0.1"
+```
+
+**📝 Anotar la IP principal** (ejemplo: `192.168.1.45`)
+
+#### **Parte B: Configurar SSH desde tu MacBook/Laptop de desarrollo**
+
+```bash
+# En tu MacBook/laptop de desarrollo
+# 1. Verificar si tienes clave SSH (recomendado para seguridad)
+ls -la ~/.ssh/
+```
+
+**Si NO tienes claves SSH, crear una:**
+```bash
+# 2. Generar clave SSH nueva
+ssh-keygen -t ed25519 -C "administrador-estacionamiento"
+
+# Presionar ENTER 3 veces para:
+# - Ubicación por defecto (~/.ssh/id_ed25519)
+# - Sin contraseña (o poner una segura)
+# - Confirmar contraseña
+```
+
+**Si YA tienes claves SSH, continuar con el paso 3:**
+
+```bash
+# 3. Probar conexión SSH básica (requerirá contraseña)
 ssh administrador@IP_DEL_THINKPAD
+```
+
+**Al conectar por primera vez verás:**
+```
+The authenticity of host 'IP_DEL_THINKPAD' can't be established.
+ECDSA key fingerprint is SHA256:...
+Are you sure you want to continue connecting (yes/no)?
+```
+
+**Escribir:** `yes` y presionar ENTER
+
+**Después pedir contraseña del usuario administrador**
+
+#### **Parte C: Configurar autenticación por clave (OPCIONAL pero RECOMENDADO)**
+
+```bash
+# 4. Copiar clave pública al ThinkPad (desde MacBook)
+ssh-copy-id administrador@IP_DEL_THINKPAD
+
+# Ingresará contraseña por última vez
+```
+
+**✅ Debe mostrar:** "Number of key(s) added: 1"
+
+```bash
+# 5. Probar conexión sin contraseña
+ssh administrador@IP_DEL_THINKPAD "whoami"
+```
+
+**✅ Debe responder:** `administrador` (sin pedir contraseña)
+
+#### **Parte D: Configurar acceso rápido (OPCIONAL)**
+
+```bash
+# 6. Crear configuración SSH para acceso rápido
+nano ~/.ssh/config
+```
+
+**📝 Agregar esta configuración:**
+```
+# Configuración ThinkPad Estacionamiento
+Host thinkpad-parking
+    HostName IP_DEL_THINKPAD
+    User administrador
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519
+    ServerAliveInterval 60
+    ServerAliveCountMax 3
+```
+
+**Reemplazar `IP_DEL_THINKPAD` con la IP real**
+
+```bash
+# 7. Ajustar permisos del archivo config
+chmod 600 ~/.ssh/config
+
+# 8. Probar conexión con alias
+ssh thinkpad-parking "hostname && date"
+```
+
+**✅ Debe mostrar hostname del ThinkPad y fecha actual**
+
+#### **Parte E: Comandos útiles para instalación remota**
+
+```bash
+# Conexión directa
+ssh administrador@IP_DEL_THINKPAD
+
+# O con alias configurado
+ssh thinkpad-parking
+
+# Ejecutar comando único
+ssh thinkpad-parking "sudo systemctl status ssh"
+
+# Transferir archivos al ThinkPad
+scp archivo.txt thinkpad-parking:/home/administrador/
+
+# Transferir desde ThinkPad a MacBook
+scp thinkpad-parking:/home/administrador/logs.txt ./
+
+# Conexión con túnel local (para acceso web)
+ssh -L 3000:localhost:3000 thinkpad-parking
+# Después abrir: http://localhost:3000 en MacBook
+```
+
+#### **Parte F: Verificación final de conectividad**
+
+```bash
+# Desde tu MacBook - verificar todas las funciones SSH
+echo "=== VERIFICACIÓN SSH COMPLETA ==="
+
+# 1. Conexión básica
+ssh thinkpad-parking "echo 'SSH conectado correctamente'"
+
+# 2. Sudo funciona
+ssh thinkpad-parking "sudo whoami"
+
+# 3. Internet funciona desde ThinkPad
+ssh thinkpad-parking "ping -c 2 8.8.8.8"
+
+# 4. Transferencia de archivos
+echo "test" > /tmp/ssh_test.txt
+scp /tmp/ssh_test.txt thinkpad-parking:/tmp/
+ssh thinkpad-parking "cat /tmp/ssh_test.txt"
+
+echo "=== SSH CONFIGURADO EXITOSAMENTE ==="
+```
+
+**✅ Todos los comandos deben ejecutarse sin errores**
+
+#### **Troubleshooting SSH**
+
+**Si no puedes conectar:**
+```bash
+# En el ThinkPad - verificar SSH funciona
+sudo systemctl status ssh
+sudo ss -tlnp | grep :22
+
+# Verificar firewall
+sudo ufw status
+
+# Ver logs SSH
+sudo journalctl -u ssh -n 20
+```
+
+**Si pide contraseña después de configurar claves:**
+```bash
+# Verificar permisos de claves SSH
+ls -la ~/.ssh/
+chmod 700 ~/.ssh/
+chmod 600 ~/.ssh/id_ed25519
+chmod 644 ~/.ssh/id_ed25519.pub
+
+# Verificar clave en el ThinkPad
+ssh thinkpad-parking "cat ~/.ssh/authorized_keys"
 ```
 
 ---
@@ -185,8 +363,13 @@ ssh administrador@IP_DEL_THINKPAD
 
 ### **PASO 2.1: Descargar código fuente**
 
+**🔀 OPCIÓN A: Usando Git (recomendado si tienes repositorio online)**
+
 ```bash
-# Conectado como administrador
+# Conectado por SSH al ThinkPad
+ssh thinkpad-parking
+
+# Una vez conectado al ThinkPad:
 cd /home/administrador
 
 # 1. Crear estructura de directorios
@@ -195,8 +378,6 @@ cd deployments
 
 # 2. Clonar repositorio
 git clone https://github.com/TU_USUARIO/parking-lot-management.git
-# O si tienes el código en USB:
-# cp -r /media/USB/parking-lot-management ./
 
 # 3. Entrar al directorio
 cd parking-lot-management
@@ -205,7 +386,55 @@ cd parking-lot-management
 ls -la
 ```
 
-**✅ Debes ver:** carpetas `src/`, `scripts/`, archivos `.env.production.template`
+**🔀 OPCIÓN B: Transferir código desde tu MacBook**
+
+```bash
+# Desde tu MacBook (en el directorio del proyecto)
+cd /Users/velez/dev/parking-lot-management
+
+# 1. Crear directorio en ThinkPad
+ssh thinkpad-parking "mkdir -p /home/administrador/deployments"
+
+# 2. Transferir todo el proyecto
+scp -r . thinkpad-parking:/home/administrador/deployments/parking-lot-management/
+
+# 3. Verificar transferencia
+ssh thinkpad-parking "ls -la /home/administrador/deployments/parking-lot-management/"
+```
+
+**🔀 OPCIÓN C: Transferir desde USB**
+
+```bash
+# Si tienes el código en USB (conectado al ThinkPad)
+# Conectado por SSH al ThinkPad:
+ssh thinkpad-parking
+
+# 1. Verificar USB montado
+lsblk
+ls /media/*/
+
+# 2. Copiar desde USB
+cp -r /media/*/parking-lot-management /home/administrador/deployments/
+
+# 3. Entrar al directorio
+cd /home/administrador/deployments/parking-lot-management
+```
+
+**✅ Con cualquier opción, debes ver:** carpetas `src/`, `scripts/`, archivos `.env.production.template`
+
+### **PASO 2.1.1: Verificar transferencia completa**
+
+```bash
+# Conectado al ThinkPad, verificar estructura del proyecto
+ssh thinkpad-parking "cd /home/administrador/deployments/parking-lot-management && find . -name '*.sh' | head -10"
+```
+
+**✅ Debe mostrar varios archivos .sh en scripts/**
+
+```bash
+# Verificar archivos principales
+ssh thinkpad-parking "cd /home/administrador/deployments/parking-lot-management && ls -la | grep -E '(package.json|.env.production.template|README)'"
+```
 
 ### **PASO 2.2: Configurar permisos de scripts**
 
@@ -221,7 +450,13 @@ ls -la scripts/*.sh
 
 ### **PASO 2.3: Crear archivo de configuración**
 
+**🔀 OPCIÓN A: Editar archivo directamente en el ThinkPad (vía SSH)**
+
 ```bash
+# Conectado por SSH al ThinkPad
+ssh thinkpad-parking
+cd /home/administrador/deployments/parking-lot-management
+
 # 1. Copiar template
 cp .env.production.template .env
 
@@ -241,6 +476,31 @@ openssl rand -hex 32
 ```bash
 # 4. Editar archivo de configuración
 nano .env
+```
+
+**🔀 OPCIÓN B: Crear archivo en MacBook y transferir**
+
+```bash
+# En tu MacBook - crear archivo .env
+cd /Users/velez/dev/parking-lot-management
+
+# 1. Copiar template localmente
+cp .env.production.template .env.thinkpad
+
+# 2. Generar credenciales
+echo "DB Password: $(openssl rand -base64 32)"
+echo "JWT Secret: $(openssl rand -hex 32)"
+
+# 3. Editar archivo localmente (con tu editor favorito)
+open .env.thinkpad
+# O: code .env.thinkpad
+# O: nano .env.thinkpad
+
+# 4. Transferir al ThinkPad después de editar
+scp .env.thinkpad thinkpad-parking:/home/administrador/deployments/parking-lot-management/.env
+
+# 5. Verificar transferencia
+ssh thinkpad-parking "ls -la /home/administrador/deployments/parking-lot-management/.env"
 ```
 
 ### **PASO 2.4: Configuración completa del archivo .env**
@@ -507,17 +767,55 @@ sudo systemctl start lightdm
 - setup-systemd-services (10 min)
 - setup-backups (5 min)
 
-### **PASO 3.5: Si necesitas salir de la instalación**
+### **PASO 3.5: Monitoreo remoto de instalación**
+
+#### **Para desconectar y reconectar a la instalación:**
 
 ```bash
+# DENTRO de la sesión SSH con screen activo:
 # Para desconectar temporalmente (instalación continúa)
 # Presionar: Ctrl+A, luego D
 
-# Para reconectar
+# DESDE TU MACBOOK - para reconectar:
+ssh thinkpad-parking
 screen -r instalacion
 
-# Para ver todas las sesiones
-screen -ls
+# Para ver todas las sesiones screen
+ssh thinkpad-parking "screen -ls"
+```
+
+#### **Monitoreo desde MacBook sin interrumpir instalación:**
+
+```bash
+# Abrir nueva terminal en MacBook para monitoreo
+# Terminal 1: Mantener SSH principal con screen
+ssh thinkpad-parking
+screen -r instalacion
+
+# Terminal 2: Monitoreo de logs en tiempo real
+ssh thinkpad-parking "tail -f /var/log/parking-installation-*.log"
+
+# Terminal 3: Monitoreo de recursos del sistema
+ssh thinkpad-parking "watch -n 5 'free -h && echo && df -h'"
+
+# Terminal 4: Ver procesos activos
+ssh thinkpad-parking "watch -n 10 'ps aux | grep -E (apt|postgresql|node|install)'"
+```
+
+#### **Comandos útiles durante instalación:**
+
+```bash
+# Ver progreso actual de instalación
+ssh thinkpad-parking "grep -E '(FASE|PHASE|===)' /var/log/parking-installation-*.log | tail -10"
+
+# Ver si hay errores
+ssh thinkpad-parking "grep -i error /var/log/parking-installation-*.log | tail -5"
+
+# Verificar espacio en disco durante instalación
+ssh thinkpad-parking "df -h /"
+
+# Ver procesos que consumen más CPU/RAM
+ssh thinkpad-parking "top -b -n 1 | head -20"
 ```
 
 ### **PASO 3.6: Verificar instalación completa**
@@ -673,12 +971,36 @@ curl -I http://localhost:3000
 
 ### **PASO 5.3: Prueba funcional completa**
 
-```bash
-# 1. Abrir navegador (si estás en el ThinkPad)
-firefox http://localhost:3000 &
+#### **🔀 OPCIÓN A: Acceso directo desde MacBook**
 
-# O desde tu MacBook
+```bash
+# 1. Verificar que aplicación esté funcionando
+ssh thinkpad-parking "curl -I http://localhost:3000"
+
+# 2. Abrir desde tu MacBook (reemplazar IP)
 open http://IP_DEL_THINKPAD:3000
+```
+
+#### **🔀 OPCIÓN B: Túnel SSH para acceso local**
+
+```bash
+# 1. Crear túnel SSH desde MacBook
+ssh -L 3000:localhost:3000 thinkpad-parking
+
+# 2. En otra terminal de MacBook o navegador
+open http://localhost:3000
+
+# La aplicación del ThinkPad aparecerá como si fuera local
+```
+
+#### **🔀 OPCIÓN C: Navegador en el ThinkPad (si tienes pantalla)**
+
+```bash
+# Si estás físicamente en el ThinkPad
+ssh thinkpad-parking "DISPLAY=:0 firefox http://localhost:3000 &"
+
+# O directamente en el ThinkPad
+firefox http://localhost:3000 &
 ```
 
 #### **Prueba 1: Entrada de vehículo**
