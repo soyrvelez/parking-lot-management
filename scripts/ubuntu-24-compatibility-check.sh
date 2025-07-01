@@ -86,33 +86,48 @@ check_postgresql_compatibility() {
     log_header "VERIFICACIÓN POSTGRESQL"
     
     # Check what PostgreSQL versions are available
-    local available_versions=$(apt search postgresql-[0-9] 2>/dev/null | grep -o "postgresql-[0-9][0-9]*" | sort -V | tail -3)
+    local available_versions
+    available_versions=$(apt search postgresql-[0-9] 2>/dev/null | grep -o "postgresql-[0-9][0-9]*" | sort -V | tail -3 || true)
     
     log_info "Versiones PostgreSQL disponibles:"
-    for version in $available_versions; do
-        echo "  - $version"
-    done
+    if [[ -n "$available_versions" ]]; then
+        for version in $available_versions; do
+            echo "  - $version"
+        done
+    else
+        echo "  - No se encontraron versiones específicas"
+    fi
     
     # Check if PostgreSQL 16 is available (Ubuntu 24.04 default)
-    if apt search postgresql-16 2>/dev/null | grep -q "postgresql-16"; then
+    set +e  # Temporarily disable exit on error
+    apt search postgresql-16 2>/dev/null | grep -q "postgresql-16"
+    if [[ $? -eq 0 ]]; then
         log_success "PostgreSQL 16 disponible (recomendado para Ubuntu 24.04)"
     else
         log_warning "PostgreSQL 16 no encontrado en repositorios"
     fi
+    set -e  # Re-enable exit on error
     
     # Check if PostgreSQL 14 is available (our scripts' default)
-    if apt search postgresql-14 2>/dev/null | grep -q "postgresql-14"; then
+    set +e  # Temporarily disable exit on error
+    apt search postgresql-14 2>/dev/null | grep -q "postgresql-14"
+    if [[ $? -eq 0 ]]; then
         log_success "PostgreSQL 14 disponible (compatibilidad con scripts)"
     else
         log_warning "PostgreSQL 14 no disponible en repositorios base"
         log_info "Se puede instalar desde repositorio oficial PostgreSQL"
     fi
+    set -e  # Re-enable exit on error
     
     # Check if any PostgreSQL is already installed
-    if dpkg -l | grep -q postgresql; then
-        local installed_version=$(dpkg -l | grep postgresql | grep -o "postgresql-[0-9][0-9]*" | head -1 || echo "desconocida")
+    set +e  # Temporarily disable exit on error
+    dpkg -l | grep -q postgresql
+    if [[ $? -eq 0 ]]; then
+        local installed_version
+        installed_version=$(dpkg -l | grep postgresql | grep -o "postgresql-[0-9][0-9]*" | head -1 || echo "desconocida")
         log_info "PostgreSQL ya instalado: $installed_version"
     fi
+    set -e  # Re-enable exit on error
 }
 
 # =============================================================================
@@ -137,17 +152,23 @@ check_display_manager() {
     fi
     
     # Check if LightDM is available
-    if apt search lightdm 2>/dev/null | grep -q "lightdm.*display manager"; then
+    set +e  # Temporarily disable exit on error
+    apt search lightdm 2>/dev/null | grep -q "lightdm.*display manager"
+    if [[ $? -eq 0 ]]; then
         log_success "LightDM disponible para instalación"
     else
         log_error "LightDM no encontrado en repositorios"
     fi
+    set -e  # Re-enable exit on error
     
     # Check if this is a desktop installation
-    if dpkg -l | grep -q ubuntu-desktop; then
+    set +e  # Temporarily disable exit on error
+    dpkg -l | grep -q ubuntu-desktop
+    if [[ $? -eq 0 ]]; then
         log_info "Instalación Ubuntu Desktop detectada"
         log_info "Requiere cambio de GDM3 a LightDM para modo kiosko"
     fi
+    set -e  # Re-enable exit on error
 }
 
 # =============================================================================
@@ -158,11 +179,14 @@ check_nodejs_compatibility() {
     log_header "VERIFICACIÓN NODE.JS"
     
     # Check Node.js availability in repositories
-    local nodejs_version=$(apt show nodejs 2>/dev/null | grep "Version:" | cut -d' ' -f2 | cut -d'.' -f1 || echo "no-disponible")
+    set +e  # Temporarily disable exit on error
+    local nodejs_version
+    nodejs_version=$(apt show nodejs 2>/dev/null | grep "Version:" | cut -d' ' -f2 | cut -d'.' -f1 || echo "no-disponible")
+    set -e  # Re-enable exit on error
     
     if [[ "$nodejs_version" == "no-disponible" ]]; then
         log_error "Node.js no encontrado en repositorios"
-    elif [[ "$nodejs_version" -ge 18 ]]; then
+    elif [[ "$nodejs_version" =~ ^[0-9]+$ ]] && [[ "$nodejs_version" -ge 18 ]]; then
         log_success "Node.js $nodejs_version disponible (compatible con requisitos >= 18)"
     else
         log_warning "Node.js $nodejs_version disponible (se requiere >= 18)"
@@ -171,8 +195,12 @@ check_nodejs_compatibility() {
     
     # Check if Node.js is already installed
     if command -v node >/dev/null 2>&1; then
-        local current_version=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
-        if [[ "$current_version" -ge 18 ]]; then
+        set +e  # Temporarily disable exit on error
+        local current_version
+        current_version=$(node --version | cut -d'v' -f2 | cut -d'.' -f1 || echo "unknown")
+        set -e  # Re-enable exit on error
+        
+        if [[ "$current_version" =~ ^[0-9]+$ ]] && [[ "$current_version" -ge 18 ]]; then
             log_success "Node.js $current_version ya instalado y compatible"
         else
             log_warning "Node.js $current_version instalado pero obsoleto"

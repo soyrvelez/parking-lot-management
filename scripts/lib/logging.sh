@@ -177,12 +177,17 @@ alias debug='log_debug'
 
 # Success logging with checkmark
 log_success() {
-    log_info "✓ $1" "$2"
+    log_info "✓ $1" "${2:-$DEFAULT_LOG_FILE}"
 }
 
 # Failure logging with X mark
 log_failure() {
-    log_error "✗ $1" "$2"
+    log_error "✗ $1" "${2:-$DEFAULT_LOG_FILE}"
+}
+
+# Warning logging with warning mark
+log_warning() {
+    log_warn "⚠ $1" "${2:-$DEFAULT_LOG_FILE}"
 }
 
 # Progress logging
@@ -329,7 +334,7 @@ initialize_logging() {
 
 # Export all public functions
 export -f log_error log_warn log_info log_debug
-export -f log_success log_failure log_progress log_header log_command
+export -f log_success log_failure log_warning log_progress log_header log_command
 export -f set_log_level get_log_level
 export -f set_log_file get_log_file clear_log
 export -f sanitize_log_message
