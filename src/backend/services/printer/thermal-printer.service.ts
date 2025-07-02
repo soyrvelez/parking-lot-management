@@ -892,6 +892,7 @@ export class ThermalPrinterService extends EventEmitter {
    */
   private processBarcodes(content: string): string {
     const GS = '\x1D';
+    const ESC = '\x1B';
     const LF = '\n';
     
     console.log('🔍 DEBUG: processBarcodes input content length:', content.length);
@@ -909,19 +910,41 @@ export class ThermalPrinterService extends EventEmitter {
       return content; // No barcodes to process
     }
     
-    // Build barcode commands section (goes at the BEGINNING after init)
+    // Build barcode commands section with multiple ESC/POS formats for better compatibility
     let barcodeSection = '';
     for (const barcode of barcodeMatches) {
       console.log('🔍 DEBUG: Converting barcode to ESC/POS:', barcode.data);
       
-      // Use the WORKING format from Test 3: GS k 4 *DATA* NULL
-      barcodeSection += GS + 'k' + '\x04' + '*' + barcode.data + '*' + '\x00';
-      barcodeSection += LF + LF; // Extra space after barcode
-      barcodeSection += barcode.data + LF; // Human readable
-      barcodeSection += LF; // Extra spacing
+      // Try multiple barcode command formats for Epson TM-T20III compatibility
       
-      console.log('🔍 DEBUG: Generated barcode command hex:', 
-        Buffer.from(GS + 'k' + '\x04' + '*' + barcode.data + '*' + '\x00', 'latin1').toString('hex'));
+      // Format 1: Standard Code 39 with settings
+      barcodeSection += ESC + 'a' + '\x01'; // Center alignment
+      barcodeSection += GS + 'H' + '\x02';  // HRI characters below
+      barcodeSection += GS + 'h' + '\x50';  // Height: 80 dots
+      barcodeSection += GS + 'w' + '\x02';  // Width: normal
+      barcodeSection += GS + 'k' + '\x04' + barcode.data + '\x00'; // Code 39 with null terminator
+      barcodeSection += LF;
+      
+      // Format 2: Alternative Code 39 format
+      barcodeSection += ESC + 'a' + '\x01'; // Center alignment
+      barcodeSection += GS + 'k' + '\x45'; // Alternative Code 39 command
+      barcodeSection += String.fromCharCode(barcode.data.length); // Length byte
+      barcodeSection += barcode.data;
+      barcodeSection += LF;
+      
+      // Format 3: Enhanced compatibility format
+      barcodeSection += ESC + 'a' + '\x01'; // Center alignment
+      barcodeSection += GS + 'H' + '\x02';  // HRI below
+      barcodeSection += GS + 'h' + '\x64';  // Height: 100 dots
+      barcodeSection += GS + 'w' + '\x03';  // Width: wide
+      barcodeSection += GS + 'k' + '\x04' + '*' + barcode.data + '*' + '\x00'; // Code 39 with asterisks
+      barcodeSection += LF + LF;
+      
+      // Human readable text
+      barcodeSection += barcode.data + LF;
+      barcodeSection += ESC + 'a' + '\x00' + LF; // Left align and extra space
+      
+      console.log('🔍 DEBUG: Generated multiple barcode formats for:', barcode.data);
     }
     
     // Remove barcode patterns from original content completely
