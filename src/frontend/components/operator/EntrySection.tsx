@@ -51,27 +51,11 @@ export default function EntrySection({ onTicketCreated, onBack }: EntrySectionPr
       if (response.ok) {
         setSuccess('¡Boleto creado exitosamente!');
         
-        // Auto print ticket and track print status
-        let ticketPrinted = true;
-        try {
-          const printResponse = await fetch('/api/hardware/print-ticket', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ ticketId: result.data?.ticketNumber || result.id }),
-          });
-          ticketPrinted = printResponse.ok;
-        } catch (printError) {
-          console.warn('Error al imprimir:', printError);
-          ticketPrinted = false;
-        }
-
-        // Extract ticket data from API response and add print status
+        // Extract ticket data from API response - printing handled by backend
         const rawTicketData = result.data || result;
         const ticketData = {
           ...rawTicketData,
-          ticketPrinted,
+          ticketPrinted: true, // Backend handles printing internally
           // Ensure we have a valid entry time, fallback to current time if invalid
           entryTime: rawTicketData.entryTime || new Date().toISOString()
         };

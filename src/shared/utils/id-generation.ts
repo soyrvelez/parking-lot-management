@@ -106,7 +106,7 @@ export class IdGenerator {
 
   /**
    * Generate barcode (ticket-specific format)
-   * For partner tickets, uses shorter format to fit Code 39 length limits (max 10 chars)
+   * All barcodes limited to 10 characters for Code 39 compatibility
    */
   public generateBarcode(ticketId: string, plateNumber: string): string {
     // For partner tickets (PT-timestamp-id), create shorter barcode max 10 chars
@@ -120,8 +120,16 @@ export class IdGenerator {
       }
     }
     
-    // Standard format for regular tickets
-    return `${ticketId}-${plateNumber}`.toUpperCase();
+    // For regular tickets (CUIDs), create 10-char barcode: T + last 6 chars of CUID + first 3 chars of plate
+    if (ticketId.length > 10) {
+      const shortId = ticketId.slice(-6); // Last 6 characters of CUID
+      const shortPlate = plateNumber.substring(0, 3); // First 3 characters of plate
+      return `T${shortId}${shortPlate}`.toUpperCase(); // e.g., "T6VWQNNCCX" (10 chars)
+    }
+    
+    // Fallback: truncate to 10 chars
+    const combined = `${ticketId}-${plateNumber}`.toUpperCase();
+    return combined.substring(0, 10);
   }
 
   /**

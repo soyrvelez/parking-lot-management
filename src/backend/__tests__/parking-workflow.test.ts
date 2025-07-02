@@ -464,5 +464,71 @@ describe('Complete Parking Workflow Tests', () => {
       // Should have added to print queue for retry
       expect(mockPrinterService.addToPrintQueue).toHaveBeenCalled();
     });
+
+    it('should handle ticket reprint by fetching data from database', async () => {
+      // Mock existing ticket with complete data
+      const mockTicket = {
+        id: 'T-123456',
+        plateNumber: 'ABC-123',
+        entryTime: new Date('2024-06-15T10:00:00Z'),
+        barcode: 'TITABC123',
+        status: 'ACTIVE'
+      };
+      
+      (prisma.ticket.findUnique as jest.Mock).mockResolvedValue(mockTicket);
+      
+      const reprintData = {
+        ticketId: 'T-123456',
+        reprint: true
+        // Note: plateNumber, entryTime, barcode are intentionally omitted
+        // to simulate frontend reprint call
+      };
+
+      const response = await request(app)
+        .post('/api/hardware/print-ticket')
+        .send(reprintData)
+        .expect(200);
+
+      // Validate successful reprint response
+      expect(response.body.success).toBe(true);
+      expect(response.body.message).toBe('Boleto reimpreso exitosamente');
+      expect(response.body.data.isReprint).toBe(true);
+      expect(response.body.data.ticketId).toBe('T-123456');
+
+      // Verify database lookup was performed
+      expect(prisma.ticket.findUnique).toHaveBeenCalledWith({
+        where: { id: 'T-123456' }
+      });
+
+      // Verify printer was called with complete ticket data
+      expect(mockPrinterService.printEntryTicket).toHaveBeenCalledWith({
+        ticketNumber: 'T-123456',
+        plateNumber: 'ABC-123',
+        entryTime: mockTicket.entryTime,
+        barcode: 'TITABC123',
+        location: 'Estacionamiento Principal',
+        totalAmount: 0,
+        type: 'ENTRY'
+      });
+    });
+
+    it('should return 404 when reprinting non-existent ticket', async () => {
+      // Mock ticket not found
+      (prisma.ticket.findUnique as jest.Mock).mockResolvedValue(null);
+      
+      const reprintData = {
+        ticketId: 'T-NONEXISTENT',
+        reprint: true
+      };
+
+      const response = await request(app)
+        .post('/api/hardware/print-ticket')
+        .send(reprintData)
+        .expect(404);
+
+      expect(response.body.success).toBe(false);
+      expect(response.body.message).toBe('Boleto no encontrado');
+      expect(response.body.error).toBe('TICKET_NOT_FOUND');
+    });
   });
 });

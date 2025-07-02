@@ -68,7 +68,7 @@ ufw allow from 192.168.0.0/16 to any port 3000
 
 # Printer communication
 ufw allow out 9100
-ufw allow from 192.168.1.100 to any port any
+ufw allow from 192.168.1.100
 
 # DNS
 ufw allow out 53

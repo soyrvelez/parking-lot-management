@@ -29,7 +29,13 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
   useEffect(() => {
     if (paymentAmount && calculatedAmount) {
       try {
-        const payment = Money.fromNumber(parseFloat(paymentAmount) || 0);
+        const paymentValue = parseFloat(paymentAmount);
+        if (isNaN(paymentValue) || paymentValue < 0) {
+          setChange(null);
+          return;
+        }
+        
+        const payment = Money.fromNumber(paymentValue);
         
         if (payment.greaterThanOrEqual(calculatedAmount)) {
           setChange(payment.subtract(calculatedAmount));
@@ -37,8 +43,11 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
           setChange(null);
         }
       } catch (error) {
+        console.error('Error calculating change:', error);
         setChange(null);
       }
+    } else {
+      setChange(null);
     }
   }, [paymentAmount, calculatedAmount]);
 
@@ -105,9 +114,17 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
     }
   };
 
-  const formatCurrency = (amount: Money | number) => {
-    const value = amount instanceof Money ? amount : Money.fromNumber(amount);
-    return value.formatPesos();
+  const formatCurrency = (amount: Money | number | null) => {
+    if (amount === null || amount === undefined) {
+      return '$0.00 MXN';
+    }
+    try {
+      const value = amount instanceof Money ? amount : Money.fromNumber(amount);
+      return value.formatPesos();
+    } catch (error) {
+      console.error('Error formatting currency:', error);
+      return '$0.00 MXN';
+    }
   };
 
   const formatDuration = () => {
@@ -268,6 +285,114 @@ export default function PaymentSection({ ticket, onPaymentComplete, onBack }: Pa
             </div>
           </div>
         </div>
+
+
+        {/* Payment Collection UI */}
+        {calculatedAmount !== null && !calculatedAmount.equals(Money.fromNumber(0)) && (
+          <div className="card">
+            {/* Error Display */}
+            {error && (
+              <div className="mb-4 sm:mb-6 text-red-600 bg-red-50 p-3 sm:p-4 rounded-lg border border-red-200 text-center">
+                <div className="font-medium text-sm sm:text-base">{error}</div>
+              </div>
+            )}
+
+            {/* Success Display */}
+            {success && (
+              <div className="mb-4 sm:mb-6 text-green-600 bg-green-50 p-3 sm:p-4 rounded-lg border border-green-200 text-center">
+                <div className="font-medium text-sm sm:text-base">{success}</div>
+              </div>
+            )}
+
+            {/* Payment Amount Input */}
+            <div className="mb-4 sm:mb-6">
+              <label htmlFor="paymentAmount" className="block text-sm font-medium text-gray-700 mb-2">
+                Efectivo Recibido (MXN)
+              </label>
+              
+              {/* Exact Payment Button - Prioritized at top */}
+              <div className="mb-3">
+                <button
+                  type="button"
+                  onClick={() => calculatedAmount && setPaymentAmount(calculatedAmount.toNumber().toString())}
+                  className="w-full py-3 px-4 text-base font-medium rounded-lg border-2 transition-colors bg-green-50 border-green-500 text-green-700 hover:bg-green-100 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2"
+                >
+                  Pago Exacto ({formatCurrency(calculatedAmount)})
+                </button>
+              </div>
+              
+              {/* Cash Shortcuts */}
+              <div className="grid grid-cols-4 gap-2 mb-3">
+                {['50', '100', '200', '500'].map((amount) => (
+                  <button
+                    key={amount}
+                    type="button"
+                    onClick={() => setPaymentAmount(amount)}
+                    className={`py-2 px-3 text-sm font-medium rounded-lg border-2 transition-colors ${
+                      paymentAmount === amount
+                        ? 'bg-blue-100 border-blue-500 text-blue-700'
+                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    ${amount}
+                  </button>
+                ))}
+              </div>
+
+              <input
+                type="number"
+                id="paymentAmount"
+                value={paymentAmount}
+                onChange={(e) => setPaymentAmount(e.target.value)}
+                placeholder="0.00"
+                step="0.01"
+                min={calculatedAmount ? calculatedAmount.toNumber() : 0}
+                className="w-full px-4 py-3 text-lg border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                required
+              />
+            </div>
+
+            {/* Change Calculation */}
+            {paymentAmount && calculatedAmount && change && parseFloat(paymentAmount) >= calculatedAmount.toNumber() && (
+              <div className="mb-4 sm:mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div className="text-center">
+                  <h3 className="text-lg font-medium text-green-800 mb-1">
+                    Cambio a Entregar
+                  </h3>
+                  <p className="text-2xl font-bold text-green-900">
+                    {formatCurrency(change)}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Submit Payment Button */}
+            <button
+              onClick={handlePayment}
+              disabled={isProcessing || !paymentAmount || !change || change.lessThan(Money.fromNumber(0))}
+              className="w-full bg-green-600 text-white text-lg font-bold py-4 px-6 rounded-lg hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {isProcessing ? (
+                <>
+                  <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
+                  PROCESANDO PAGO...
+                </>
+              ) : (
+                'PROCESAR PAGO'
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Already Paid Message */}
+        {calculatedAmount !== null && calculatedAmount.equals(Money.fromNumber(0)) && (
+          <div className="card bg-green-50 border-l-4 border-green-500">
+            <div className="text-center">
+              <div className="text-2xl sm:text-3xl font-bold text-green-600 mb-2">¡Boleto Pagado!</div>
+              <div className="text-gray-600">Este vehículo ya ha completado su pago.</div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

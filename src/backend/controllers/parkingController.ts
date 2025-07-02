@@ -106,13 +106,27 @@ export class ParkingController {
   
         // Print entry ticket
         try {
+          // Ensure printer is connected before printing
+          const printerStatus = this.printerService.getStatus();
+          if (!printerStatus.connected) {
+            console.log('[ENTRY] Connecting to printer...');
+            const connected = await this.printerService.connect();
+            if (!connected) {
+              console.error('[ENTRY] Failed to connect to printer');
+              // Continue anyway - ticket is created, just not printed
+            }
+          }
+          
           await this.printerService.printEntryTicket({
             ticketNumber: ticket.id,
             plateNumber: ticket.plateNumber,
             entryTime: ticket.entryTime,
-            totalAmount: new Money(pricing.minimumRate).toNumber(),
-            type: 'ENTRY'
+            barcode: ticket.barcode,
+            location: 'Estacionamiento Principal',
+            totalAmount: 0, // Not applicable for entry tickets
+            type: 'ENTRY' as const
           });
+          console.log(`[ENTRY] Print job queued for ticket: ${ticket.id}`);
         } catch (printError) {
           // Log print failure but don't fail the entry
           console.error('Failed to print entry ticket:', printError);
@@ -379,6 +393,16 @@ export class ParkingController {
       // Print payment receipt
       let receiptPrinted = false;
       try {
+        // Ensure printer is connected before printing
+        const printerStatus = this.printerService.getStatus();
+        if (!printerStatus.connected) {
+          console.log('[PAYMENT] Connecting to printer...');
+          const connected = await this.printerService.connect();
+          if (!connected) {
+            console.error('[PAYMENT] Failed to connect to printer');
+          }
+        }
+        
         await this.printerService.printPaymentReceipt({
           ticketNumber: updatedTicket.id,
           plateNumber: updatedTicket.plateNumber,
