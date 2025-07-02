@@ -941,6 +941,29 @@ export class ThermalPrinterService extends EventEmitter {
   }
 
   /**
+   * Write raw ESC/POS content directly to USB device (Ubuntu/Linux)
+   */
+  private async writeRawToDevice(content: string): Promise<boolean> {
+    console.log('🔍 DEBUG: writeRawToDevice called with content length:', content.length);
+    console.log('🔍 DEBUG: Device path:', this.config.devicePath);
+    
+    try {
+      // Convert string to binary buffer for proper ESC/POS handling
+      const buffer = Buffer.from(content, 'latin1');
+      console.log('🔍 DEBUG: Writing buffer of size:', buffer.length);
+      
+      // Write directly to the USB device
+      await fs.writeFile(this.config.devicePath, buffer);
+      console.log('🔍 DEBUG: Successfully wrote to device:', this.config.devicePath);
+      
+      return true;
+    } catch (error) {
+      console.error('🔍 DEBUG: Failed to write to device:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Try direct device writing as fallback (macOS)
    */
   private async tryDirectDeviceWrite(content: string): Promise<boolean> {
@@ -1046,19 +1069,48 @@ export class ThermalPrinterService extends EventEmitter {
         console.log('🔍 DEBUG: Using CUPS printing path');
         return await this.executeJobCups(job);
       } else {
-        // Use standard thermal printer library
+        // Use standard thermal printer library (Linux/Ubuntu)
         if (!this.printer) {
           return false;
         }
 
-        // Clear printer buffer
+        console.log('🔍 DEBUG: Using thermal printer library path (Ubuntu)');
+        console.log('🔍 DEBUG: Original job content:', JSON.stringify(job.content));
+        
+        // Check if content has barcode patterns that need processing
+        const hasBarcodePatterns = /\*([A-Z0-9\-]+)\*/.test(job.content);
+        console.log('🔍 DEBUG: Content has barcode patterns:', hasBarcodePatterns);
+        
+        if (hasBarcodePatterns) {
+          // For Ubuntu: Use raw ESC/POS commands to ensure barcode printing works
+          console.log('🔍 DEBUG: Processing barcodes with ESC/POS commands for Ubuntu');
+          const escPosContent = this.formatContentForThermalPrinter(job.content);
+          
+          // Write raw ESC/POS content directly to device
+          try {
+            await this.writeRawToDevice(escPosContent);
+            this.emit('printJobExecuted', job);
+            return true;
+          } catch (error) {
+            console.error('🔍 DEBUG: Raw device write failed, falling back to library method');
+            // Fall back to library method without barcodes
+          }
+        }
+
+        // Standard library printing (fallback or non-barcode content)
         this.printer.clear();
         
         // Set character encoding for Spanish characters
         this.printer.setCharacterSet(CharacterSet.PC858_EURO);
         
-        // Print content
-        this.printer.println(job.content);
+        // Remove barcode patterns from content for library printing
+        const cleanContent = job.content.replace(/\*([A-Z0-9\-]+)\*/g, (match, barcodeData) => {
+          console.log('🔍 DEBUG: Removing barcode pattern for library printing:', barcodeData);
+          return barcodeData; // Replace with plain text
+        });
+        
+        // Print cleaned content
+        this.printer.println(cleanContent);
         
         // Add feed lines and cut
         for (let i = 0; i < HARDWARE_CONSTANTS.PRINTER.FEED_LINES; i++) {
