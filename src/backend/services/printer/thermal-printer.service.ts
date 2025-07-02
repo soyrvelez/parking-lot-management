@@ -899,7 +899,7 @@ export class ThermalPrinterService extends EventEmitter {
     
     // Extract all barcode patterns first
     const barcodeMatches: Array<{match: string, data: string}> = [];
-    content.replace(/\*([A-Z0-9\-]+)\*/g, (match, barcodeData) => {
+    content.replace(/\*([A-Za-z0-9\-]+)\*/g, (match, barcodeData) => {
       barcodeMatches.push({match, data: barcodeData});
       console.log('🔍 DEBUG: Found barcode pattern:', barcodeData);
       return match; // Don't modify yet
@@ -956,7 +956,7 @@ export class ThermalPrinterService extends EventEmitter {
    */
   private parseContentWithBarcodes(content: string): Array<{type: 'text' | 'barcode', content: string}> {
     const parts: Array<{type: 'text' | 'barcode', content: string}> = [];
-    const barcodePattern = /\*([A-Z0-9\-]+)\*/g;
+    const barcodePattern = /\*([A-Za-z0-9\-]+)\*/g; // Include lowercase letters for ticket IDs
     
     let lastIndex = 0;
     let match;

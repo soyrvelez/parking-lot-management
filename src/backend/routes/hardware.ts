@@ -2,11 +2,21 @@ import { Router } from 'express';
 import { i18n } from '../../shared/localization';
 import { hardwareService } from '../services/hardwareService';
 import { ThermalPrinterService } from '../services/printer/thermal-printer.service';
+import { PrismaClient } from '@prisma/client';
 
 const router = Router();
 
-// Initialize thermal printer service
-const thermalPrinter = new ThermalPrinterService();
+// Initialize services
+const prisma = new PrismaClient();
+const thermalPrinter = new ThermalPrinterService({
+  interfaceType: process.env.PRINTER_INTERFACE_TYPE as 'usb' | 'tcp' || 'usb',
+  devicePath: process.env.PRINTER_DEVICE_PATH || '/dev/usb/lp0',
+  host: process.env.PRINTER_HOST || '192.168.1.100',
+  port: parseInt(process.env.PRINTER_PORT || '9100'),
+  timeout: parseInt(process.env.PRINTER_TIMEOUT || '5000'),
+  retryAttempts: parseInt(process.env.PRINTER_RETRY_ATTEMPTS || '3'),
+  paperWidth: parseInt(process.env.PRINTER_PAPER_WIDTH || '32')
+});
 
 // Hardware status endpoint
 router.get('/status', async (req, res) => {
@@ -53,7 +63,53 @@ router.get('/status', async (req, res) => {
 // Print ticket endpoint for operator interface (supports reprint)
 router.post('/print-ticket', async (req, res) => {
   try {
-    const { ticketId, plateNumber, entryTime, barcode, reprint = false } = req.body;
+    let { ticketId, plateNumber, entryTime, barcode, reprint = false } = req.body;
+    
+    console.log(`🔍 DEBUG: Print request - ticketId: ${ticketId}, plate: ${plateNumber}, reprint: ${reprint}`);
+    
+    // If reprinting, fetch ticket data from database
+    if (reprint && !plateNumber) {
+      // Check if this is a partner ticket (starts with "PT-")
+      const isPartnerTicket = ticketId.startsWith('PT-');
+      
+      if (isPartnerTicket) {
+        // Look up partner ticket
+        const partnerTicket = await prisma.partnerTicket.findUnique({
+          where: { ticketNumber: ticketId }
+        });
+        
+        if (!partnerTicket) {
+          return res.status(404).json({
+            success: false,
+            message: 'Boleto de socio no encontrado',
+            error: 'PARTNER_TICKET_NOT_FOUND'
+          });
+        }
+        
+        plateNumber = partnerTicket.plateNumber;
+        entryTime = partnerTicket.entryTime;
+        barcode = partnerTicket.barcode;
+      } else {
+        // Look up regular ticket
+        const ticket = await prisma.ticket.findUnique({
+          where: { id: ticketId }
+        });
+        
+        if (!ticket) {
+          return res.status(404).json({
+            success: false,
+            message: 'Boleto no encontrado',
+            error: 'TICKET_NOT_FOUND'
+          });
+        }
+        
+        plateNumber = ticket.plateNumber;
+        entryTime = ticket.entryTime;
+        barcode = ticket.barcode;
+      }
+      
+      console.log(`🔍 DEBUG: Retrieved ticket data - plate: ${plateNumber}, entryTime: ${entryTime}, barcode: ${barcode}`);
+    }
     
     console.log(`🔍 DEBUG: Print request - ticketId: ${ticketId}, plate: ${plateNumber}, reprint: ${reprint}`);
     
@@ -67,13 +123,21 @@ router.post('/print-ticket', async (req, res) => {
       }
     }
     
+    // DEBUG: Check what we received in the request
+    console.log('🔍 DEBUG: Request body received:', JSON.stringify(req.body));
+    console.log('🔍 DEBUG: Variables extracted:', { 
+      ticketId, plateNumber, entryTime, barcode, reprint 
+    });
+    
     // Create receipt data for entry ticket
     const receiptData = {
       ticketNumber: ticketId,
-      plateNumber: plateNumber,
-      entryTime: new Date(entryTime),
-      barcode: barcode,
-      location: 'Estacionamiento Principal'
+      plateNumber: plateNumber || 'PLACA-PENDIENTE', // Fallback for missing plate
+      entryTime: entryTime ? new Date(entryTime) : new Date(), // Fallback to current time
+      barcode: barcode || ticketId, // Fallback to ticket ID if no barcode
+      location: 'Estacionamiento Principal',
+      totalAmount: 0, // Not applicable for entry tickets
+      type: 'ENTRY' as const
     };
 
     console.log('🔍 DEBUG: Receipt data created:', JSON.stringify(receiptData));
