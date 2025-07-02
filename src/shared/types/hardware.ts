@@ -131,7 +131,7 @@ export const HARDWARE_CONSTANTS = {
     ENCODING: 'utf8',
     LINE_SEPARATOR: '\n',
     CUT_COMMAND: '\x1D\x56\x42\x00', // ESC/POS cut command
-    FEED_LINES: 6
+    FEED_LINES: 12
   },
   SCANNER: {
     DEFAULT_TIMEOUT: 30000, // 30 seconds

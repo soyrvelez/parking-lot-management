@@ -941,6 +941,55 @@ export class ThermalPrinterService extends EventEmitter {
   }
 
   /**
+   * Parse content and split into text and barcode parts for library printing
+   */
+  private parseContentWithBarcodes(content: string): Array<{type: 'text' | 'barcode', content: string}> {
+    const parts: Array<{type: 'text' | 'barcode', content: string}> = [];
+    const barcodePattern = /\*([A-Z0-9\-]+)\*/g;
+    
+    let lastIndex = 0;
+    let match;
+    
+    console.log('🔍 DEBUG: Parsing content for barcodes...');
+    
+    while ((match = barcodePattern.exec(content)) !== null) {
+      // Add text before barcode
+      if (match.index > lastIndex) {
+        const textContent = content.substring(lastIndex, match.index);
+        if (textContent.trim()) {
+          parts.push({ type: 'text', content: textContent });
+          console.log('🔍 DEBUG: Found text part:', textContent.substring(0, 50) + '...');
+        }
+      }
+      
+      // Add barcode part
+      const barcodeData = match[1];
+      parts.push({ type: 'barcode', content: barcodeData });
+      console.log('🔍 DEBUG: Found barcode part:', barcodeData);
+      
+      lastIndex = match.index + match[0].length;
+    }
+    
+    // Add remaining text after last barcode
+    if (lastIndex < content.length) {
+      const remainingText = content.substring(lastIndex);
+      if (remainingText.trim()) {
+        parts.push({ type: 'text', content: remainingText });
+        console.log('🔍 DEBUG: Found remaining text part:', remainingText.substring(0, 50) + '...');
+      }
+    }
+    
+    // If no barcodes found, treat entire content as text
+    if (parts.length === 0) {
+      parts.push({ type: 'text', content: content });
+      console.log('🔍 DEBUG: No barcodes found, treating as plain text');
+    }
+    
+    console.log('🔍 DEBUG: Total parts found:', parts.length);
+    return parts;
+  }
+
+  /**
    * Write raw ESC/POS content directly to USB device (Ubuntu/Linux)
    */
   private async writeRawToDevice(content: string): Promise<boolean> {
@@ -1074,45 +1123,50 @@ export class ThermalPrinterService extends EventEmitter {
           return false;
         }
 
-        console.log('🔍 DEBUG: Using thermal printer library path (Ubuntu)');
+        console.log('🔍 DEBUG: Using simplified thermal printer library path (Ubuntu)');
         console.log('🔍 DEBUG: Original job content:', JSON.stringify(job.content));
         
-        // Check if content has barcode patterns that need processing
-        const hasBarcodePatterns = /\*([A-Z0-9\-]+)\*/.test(job.content);
-        console.log('🔍 DEBUG: Content has barcode patterns:', hasBarcodePatterns);
-        
-        if (hasBarcodePatterns) {
-          // For Ubuntu: Use raw ESC/POS commands to ensure barcode printing works
-          console.log('🔍 DEBUG: Processing barcodes with ESC/POS commands for Ubuntu');
-          const escPosContent = this.formatContentForThermalPrinter(job.content);
-          
-          // Write raw ESC/POS content directly to device
-          try {
-            await this.writeRawToDevice(escPosContent);
-            this.emit('printJobExecuted', job);
-            return true;
-          } catch (error) {
-            console.error('🔍 DEBUG: Raw device write failed, falling back to library method');
-            // Fall back to library method without barcodes
-          }
-        }
-
-        // Standard library printing (fallback or non-barcode content)
+        // Clear printer buffer and initialize
         this.printer.clear();
         
         // Set character encoding for Spanish characters
         this.printer.setCharacterSet(CharacterSet.PC858_EURO);
         
-        // Remove barcode patterns from content for library printing
-        const cleanContent = job.content.replace(/\*([A-Z0-9\-]+)\*/g, (match, barcodeData) => {
-          console.log('🔍 DEBUG: Removing barcode pattern for library printing:', barcodeData);
-          return barcodeData; // Replace with plain text
-        });
+        // Process content: split into text and barcode sections
+        const contentParts = this.parseContentWithBarcodes(job.content);
         
-        // Print cleaned content
-        this.printer.println(cleanContent);
+        // Print each part (text or barcode)
+        for (const part of contentParts) {
+          if (part.type === 'text') {
+            // Regular text content
+            this.printer.println(part.content);
+          } else if (part.type === 'barcode') {
+            // Use library's built-in Code 39 barcode method
+            console.log('🔍 DEBUG: Printing barcode with library method:', part.content);
+            try {
+              // Add some space before barcode
+              this.printer.newLine();
+              
+              // Print barcode using proven library method
+              this.printer.code39(part.content, { 
+                height: 50,           // Barcode height
+                width: 'NORMAL',      // Barcode width  
+                text: 'BELOW',        // Print human readable text below
+                font: 'A'             // Font for human readable text
+              });
+              
+              // Add space after barcode
+              this.printer.newLine();
+              this.printer.newLine();
+            } catch (barcodeError) {
+              console.error('🔍 DEBUG: Barcode printing failed, using plain text:', barcodeError);
+              // Fallback to plain text if barcode fails
+              this.printer.println(part.content);
+            }
+          }
+        }
         
-        // Add feed lines and cut
+        // Add extra feed lines for cutting space
         for (let i = 0; i < HARDWARE_CONSTANTS.PRINTER.FEED_LINES; i++) {
           this.printer.newLine();
         }
