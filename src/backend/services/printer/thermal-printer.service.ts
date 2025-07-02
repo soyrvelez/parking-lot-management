@@ -87,7 +87,10 @@ export class ThermalPrinterService extends EventEmitter {
         } else {
           // Standard USB device path for Linux
           this.isCupsPrinter = false;
-          const interfaceString = `printer:${this.config.devicePath}`;
+          // On Linux, use the device path directly without 'printer:' prefix
+          const interfaceString = process.platform === 'linux' 
+            ? this.config.devicePath 
+            : `printer:${this.config.devicePath}`;
           this.printer = new ThermalPrinter({
             type: PrinterTypes.EPSON,
             interface: interfaceString,
@@ -133,13 +136,14 @@ export class ThermalPrinterService extends EventEmitter {
       // macOS - prioritize CUPS printers
       return 'printer:ThermalPrinter';
     } else if (platform === 'linux') {
-      // Linux - prioritize USB devices
+      // Linux - prioritize most common USB devices first
+      // Most Ubuntu systems use /dev/usb/lp1 for first USB printer
       const linuxDevices = [
+        '/dev/usb/lp1',   // Most common on Ubuntu for USB printers
+        '/dev/usb/lp0',   // Default USB printer
         HARDWARE_CONSTANTS.PRINTER.USB_SYMLINK,     // /dev/thermal-printer (udev rule)
-        HARDWARE_CONSTANTS.PRINTER.DEFAULT_USB_DEVICE, // /dev/usb/lp0
         HARDWARE_CONSTANTS.PRINTER.ALTERNATIVE_USB_DEVICE, // /dev/ttyUSB0
         '/dev/lp0',  // Standard line printer
-        '/dev/lp1'   // Alternative line printer
       ];
       return linuxDevices[0];
     } else {
@@ -173,8 +177,25 @@ export class ThermalPrinterService extends EventEmitter {
         });
       }
       
-      // Regular file system check for Linux devices
-      await fs.access(devicePath, constants.R_OK | constants.W_OK);
+      // For Linux USB devices, check if device file exists
+      // Device files don't support standard R/W permission checks
+      // so we just check if the file exists
+      await fs.access(devicePath, constants.F_OK);
+      
+      // Additional check for Linux: verify it's a character device
+      if (process.platform === 'linux') {
+        try {
+          const stats = await fs.stat(devicePath);
+          // Check if it's a character device (like /dev/usb/lp1)
+          if (stats.isCharacterDevice()) {
+            return true;
+          }
+        } catch (statError) {
+          // If stat fails, fall back to basic existence check
+          return true;
+        }
+      }
+      
       return true;
     } catch (error) {
       return false;
@@ -185,14 +206,38 @@ export class ThermalPrinterService extends EventEmitter {
    * Find available USB printer device
    */
   private async findUSBDevice(): Promise<string | null> {
-    const usbDevices = [
-      'printer:ThermalPrinter',  // macOS CUPS printer (try first on macOS)
-      HARDWARE_CONSTANTS.PRINTER.USB_SYMLINK,
-      HARDWARE_CONSTANTS.PRINTER.DEFAULT_USB_DEVICE,
-      HARDWARE_CONSTANTS.PRINTER.ALTERNATIVE_USB_DEVICE,
-      '/dev/lp0',
-      '/dev/lp1'
-    ];
+    // Platform-specific device priority order
+    let usbDevices: string[];
+    
+    if (process.platform === 'darwin') {
+      // macOS - prioritize CUPS printers
+      usbDevices = [
+        'printer:ThermalPrinter',
+        HARDWARE_CONSTANTS.PRINTER.USB_SYMLINK,
+        HARDWARE_CONSTANTS.PRINTER.DEFAULT_USB_DEVICE,
+        '/dev/lp0',
+        '/dev/lp1'
+      ];
+    } else if (process.platform === 'linux') {
+      // Linux - prioritize common USB character devices
+      usbDevices = [
+        '/dev/usb/lp1',  // Most common on Ubuntu for USB printers
+        '/dev/usb/lp0',  // Default USB printer
+        '/dev/lp1',      // Alternative line printer
+        '/dev/lp0',      // Standard line printer
+        HARDWARE_CONSTANTS.PRINTER.USB_SYMLINK,     // /dev/thermal-printer (custom udev rule)
+        HARDWARE_CONSTANTS.PRINTER.ALTERNATIVE_USB_DEVICE, // /dev/ttyUSB0
+      ];
+    } else {
+      // Windows/other - use default order
+      usbDevices = [
+        HARDWARE_CONSTANTS.PRINTER.USB_SYMLINK,
+        HARDWARE_CONSTANTS.PRINTER.DEFAULT_USB_DEVICE,
+        HARDWARE_CONSTANTS.PRINTER.ALTERNATIVE_USB_DEVICE,
+        '/dev/lp0',
+        '/dev/lp1'
+      ];
+    }
 
     for (const device of usbDevices) {
       if (await this.checkUSBDevice(device)) {
