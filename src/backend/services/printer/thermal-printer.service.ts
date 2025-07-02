@@ -501,9 +501,20 @@ export class ThermalPrinterService extends EventEmitter {
     lines.push(this.centerText('='.repeat(this.config.paperWidth)));
     lines.push('');
     
-    // Ticket info
-    lines.push(i18n.t('receipt.ticket_number', { number: data.ticketNumber }));
-    lines.push(i18n.t('receipt.plate_number', { plate: data.plateNumber }));
+    // Ticket info with debugging
+    console.log('🔍 DEBUG: Formatting ticket with data:', { 
+      ticketNumber: data.ticketNumber, 
+      plateNumber: data.plateNumber 
+    });
+    
+    const ticketLine = i18n.t('receipt.ticket_number', { number: data.ticketNumber });
+    const plateLine = i18n.t('receipt.plate_number', { plate: data.plateNumber });
+    
+    console.log('🔍 DEBUG: i18n ticket line result:', ticketLine);
+    console.log('🔍 DEBUG: i18n plate line result:', plateLine);
+    
+    lines.push(ticketLine);
+    lines.push(plateLine);
     lines.push('');
     
     // Entry time (if available)
@@ -1141,27 +1152,37 @@ export class ThermalPrinterService extends EventEmitter {
             // Regular text content
             this.printer.println(part.content);
           } else if (part.type === 'barcode') {
-            // Use library's built-in Code 39 barcode method
-            console.log('🔍 DEBUG: Printing barcode with library method:', part.content);
+            // Use raw ESC/POS commands for barcode since library methods don't work
+            console.log('🔍 DEBUG: Printing barcode with raw ESC/POS commands:', part.content);
+            
             try {
-              // Add some space before barcode
+              // Add space before barcode
               this.printer.newLine();
               
-              // Print barcode using proven library method
-              this.printer.code39(part.content, { 
-                height: 50,           // Barcode height
-                width: 'NORMAL',      // Barcode width  
-                text: 'BELOW',        // Print human readable text below
-                font: 'A'             // Font for human readable text
-              });
+              // Use the proven ESC/POS barcode command that worked on macOS
+              const GS = '\x1D';
+              const barcodeCommand = GS + 'k' + '\x04' + '*' + part.content + '*' + '\x00';
               
-              // Add space after barcode
+              // Send raw command
+              console.log('🔍 DEBUG: Sending raw barcode command for:', part.content);
+              this.printer.raw(Buffer.from(barcodeCommand, 'latin1'));
+              
+              // Add spacing and human readable text
               this.printer.newLine();
               this.printer.newLine();
+              this.printer.println(this.centerText(part.content));
+              this.printer.newLine();
+              
+              console.log('🔍 DEBUG: Raw barcode command sent successfully');
             } catch (barcodeError) {
-              console.error('🔍 DEBUG: Barcode printing failed, using plain text:', barcodeError);
-              // Fallback to plain text if barcode fails
-              this.printer.println(part.content);
+              console.error('🔍 DEBUG: Raw barcode command failed:', barcodeError);
+              
+              // Final fallback: Enhanced visual representation
+              this.printer.newLine();
+              this.printer.println(this.centerText('▌▌  ▌ ▌▌▌  ▌ ▌▌  ▌▌'));
+              this.printer.println(this.centerText(`*${part.content}*`));
+              this.printer.println(this.centerText('▌▌  ▌ ▌▌▌  ▌ ▌▌  ▌▌'));
+              this.printer.newLine();
             }
           }
         }
