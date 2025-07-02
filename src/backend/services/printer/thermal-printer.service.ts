@@ -864,8 +864,10 @@ export class ThermalPrinterService extends EventEmitter {
     let processedContent = this.processBarcodes(content);
     formatted += processedContent;
     
-    // Add feed lines
-    formatted += LF + LF + LF;
+    // Add feed lines for cutting space
+    for (let i = 0; i < HARDWARE_CONSTANTS.PRINTER.FEED_LINES; i++) {
+      formatted += LF;
+    }
     
     // Cut paper
     formatted += GS + 'V' + '\x41' + '\x00';  // GS V 65 0 - Full cut

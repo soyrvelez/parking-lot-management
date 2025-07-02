@@ -52,6 +52,7 @@ export interface ReceiptData {
   exitTime?: Date;
   durationMinutes?: number;
   totalAmount: number;
+  barcode?: string; // Code 39 barcode for entry tickets
   paymentMethod?: 'EFECTIVO' | 'PENSION';
   change?: number;
   cashReceived?: number; // Amount of cash received
@@ -62,6 +63,7 @@ export interface ReceiptData {
   type: 'ENTRY' | 'PAYMENT' | 'LOST_TICKET' | 'PENSION';
   customerName?: string; // For pension customers
   validUntil?: Date; // For pension receipts
+  location?: string; // Parking lot location name
 }
 
 export interface ScannerConfig {
@@ -129,7 +131,7 @@ export const HARDWARE_CONSTANTS = {
     ENCODING: 'utf8',
     LINE_SEPARATOR: '\n',
     CUT_COMMAND: '\x1D\x56\x42\x00', // ESC/POS cut command
-    FEED_LINES: 3
+    FEED_LINES: 6
   },
   SCANNER: {
     DEFAULT_TIMEOUT: 30000, // 30 seconds
